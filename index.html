@@ -192,6 +192,21 @@ nav.tabs svg{width:22px;height:22px;stroke:currentColor;fill:none;stroke-width:2
 .hist div{flex:1;border-radius:5px 5px 0 0;background:#1d4a63;position:relative;min-height:3px}
 .hist div.hit{background:var(--teal)}
 .hist span{position:absolute;top:-15px;left:0;right:0;text-align:center;font-size:9.5px;color:var(--mut)}
+.chart{width:100%;height:auto;display:block;margin-top:6px}
+.legend{display:flex;gap:14px;flex-wrap:wrap;font-size:11px;color:var(--mut);margin-top:6px}
+.legend span{display:inline-flex;align-items:center;gap:6px}
+.legend i{width:9px;height:9px;border-radius:50%;display:inline-block}
+.legend i.dash{width:16px;height:0;border-top:2px dashed;border-radius:0;background:none}
+.goalline{font-size:16px}
+.tiles2{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin:12px 0 8px}
+.tiles2 .tile b{font-size:21px}
+.rvphoto{background:#0d141c;border:1px solid var(--line);border-radius:14px;padding:12px;margin-bottom:12px}
+.rvimg{width:84px;height:112px;object-fit:cover;border-radius:10px;background:#000;flex:none}
+.rvrow{display:grid;grid-template-columns:24px 1fr 84px auto;gap:8px;align-items:center;margin-top:8px}
+.rvrow input[type=checkbox]{width:20px;height:20px;accent-color:var(--teal)}
+.rvrow .inp{padding:9px 10px}
+.rvrow .rv-u{min-width:36px}
+.rvtxt{white-space:pre-wrap;font-size:11px;color:var(--mut);background:#0a0e13;border-radius:8px;padding:8px;max-height:160px;overflow:auto}
 .scanbtn{display:flex;align-items:center;gap:6px;flex:none;padding:0 14px;border-radius:12px;background:#0f3b44;color:var(--teal);border:1px solid #1d5b66;font-weight:600;font-size:14px}
 .scanbtn svg{width:18px;height:18px;stroke:currentColor;fill:none;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
 .vidwrap{position:relative;border-radius:14px;overflow:hidden;background:#000;aspect-ratio:4/3;margin:6px 0 10px}
@@ -260,7 +275,7 @@ function sum(list){
 /* ---------- data ---------- */
 var KEY='macropulse.v1';
 var MEALS=[{id:'breakfast',name:'Breakfast',ico:'🍳'},{id:'lunch',name:'Lunch',ico:'🥗'},{id:'dinner',name:'Dinner',ico:'🍽️'},{id:'snacks',name:'Snacks',ico:'🥜'}];
-function defaults(){return {v:1,goals:{k:2100,nc:30,p:140,f:155,fi:28,w:3000},bottle:750,units:'lb',fastGoal:16,vit:{},fast:null,fasts:[],log:{},water:{},custom:[],fav:[],recent:[],recipes:[],seeded:false}}
+function defaults(){return {v:1,goals:{k:2100,nc:30,p:140,f:155,fi:28,w:3000},bottle:750,units:'lb',fastGoal:16,goalW:null,goalDate:null,goalStartW:null,trendDays:28,metrics:[],vit:{},fast:null,fasts:[],log:{},water:{},custom:[],fav:[],recent:[],recipes:[],seeded:false}}
 var memOnly=false;
 function load(){
   var d=defaults();
@@ -364,7 +379,7 @@ seedSample();
 
 /* ---------- state for UI ---------- */
 function autoMeal(){var h=new Date().getHours();return h<10?'breakfast':h<15?'lunch':h<20?'dinner':'snacks'}
-var ui={tab:'log',date:today(),meal:autoMeal(),q:'',filter:'all',cf:{},cfEdit:null,rd:null,rview:'serving',followToday:true,wk:null};
+var ui={tab:'log',date:today(),meal:autoMeal(),q:'',filter:'all',cf:{},cfEdit:null,rd:null,rview:'serving',followToday:true,wk:null,wr:'30',mr:'30'};
 
 function dayEntries(d){return S.log[d]||[]}
 function entryTot(e){return scale(e.b,e.qty)}
@@ -776,54 +791,223 @@ var LB=2.20462;
 var wDisp=function(lb){return S.units==='kg'?lb/LB:lb};
 var wFrom=function(v){return S.units==='kg'?v*LB:v};
 var wFmt=function(lb){return (Math.round(wDisp(lb)*10)/10).toFixed(1)};
-function vit(d){var v=S.vit[d]||{};return {k:v.k||[],g:v.g||[],w:v.w==null?null:v.w}}
 function avgOf(a){return a.length?a.reduce(function(x,y){return x+y},0)/a.length:null}
 function weightsIn(from,to){var out=[],d=from;while(d<=to){var w=vit(d).w;if(w!=null)out.push(w);d=addDays(d,1)}return out}
-function dailyAvg(type,d){var r=vit(d)[type].map(function(x){return x.v});return avgOf(r)}
-function spark(series,avgSeries,color){
-  var vals=series.filter(function(v){return v!=null}).concat((avgSeries||[]).filter(function(v){return v!=null}));
-  if(!vals.length)return '<div class="empty">No readings yet.</div>';
-  var W=300,H=84,p=8,mn=Math.min.apply(null,vals),mx=Math.max.apply(null,vals),rg=mx-mn;
-  if(rg<1e-9){mn-=1;mx+=1}else{mn-=rg*.12;mx+=rg*.12}
-  var n=series.length,x=function(i){return p+i*(W-2*p)/Math.max(1,n-1)},y=function(v){return H-p-(v-mn)/(mx-mn)*(H-2*p)};
-  function path(arr){var d='',pen=false;arr.forEach(function(v,i){if(v==null){pen=false;return}d+=(pen?'L':'M')+x(i).toFixed(1)+' '+y(v).toFixed(1);pen=true});return d}
-  var out='<svg class="spark" viewBox="0 0 '+W+' '+H+'" role="img" aria-label="Trend chart">';
-  out+='<path d="'+path(series)+'" fill="none" stroke="'+color+'" stroke-width="1.6" opacity=".55" stroke-linejoin="round"/>';
-  if(avgSeries)out+='<path d="'+path(avgSeries)+'" fill="none" stroke="#e8eef5" stroke-width="2.2" stroke-dasharray="5 4" stroke-linecap="round"/>';
-  series.forEach(function(v,i){if(v!=null)out+='<circle cx="'+x(i).toFixed(1)+'" cy="'+y(v).toFixed(1)+'" r="3" fill="'+color+'"/>'});
-  return out+'</svg>';
-}
 function dateNavHtml(){
   var d=ui.date;
   return '<div class="datenav"><button class="iconbtn" data-a="prevday" aria-label="Previous day"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#e8eef5" stroke-width="2.4" stroke-linecap="round"><path d="M15 5l-7 7 7 7"/></svg></button><button class="dl" data-a="todaybtn">'+esc(dlabel(d))+'</button><button class="iconbtn" data-a="nextday" aria-label="Next day"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#e8eef5" stroke-width="2.4" stroke-linecap="round"><path d="M9 5l7 7-7 7"/></svg></button></div>';
 }
+/* weekly summary */
+function rangeLabel(w){
+  var a=parseD(w.start),b=parseD(w.end),o={month:'short',day:'numeric'};
+  return a.toLocaleDateString(undefined,o)+' – '+b.toLocaleDateString(undefined,o);
+}
+function signed(n,dec){return (n>0?'+':'')+n.toFixed(dec)}
+function copyText(t){
+  if(navigator.clipboard&&navigator.clipboard.writeText){return navigator.clipboard.writeText(t)}
+  return new Promise(function(res,rej){
+    var a=document.createElement('textarea');a.value=t;a.style.position='fixed';a.style.opacity='0';document.body.appendChild(a);a.select();
+    try{document.execCommand('copy')?res():rej()}catch(e){rej(e)}a.remove();
+  });
+}
+setInterval(tickFast,30000);
+
+
+/* ---------- day numbers, readings, metrics ---------- */
+var dn=function(d){var p=d.split('-').map(Number);return Date.UTC(p[0],p[1]-1,p[2])/864e5};
+var fromDn=function(n){var d=new Date(n*864e5);return d.getUTCFullYear()+'-'+pad(d.getUTCMonth()+1)+'-'+pad(d.getUTCDate())};
+var dnLabel=function(n){return new Date(n*864e5).toLocaleDateString(undefined,{month:'short',day:'numeric',timeZone:'UTC'})};
+var dnLabelY=function(n){return new Date(n*864e5).toLocaleDateString(undefined,{month:'short',day:'numeric',year:'numeric',timeZone:'UTC'})};
+function vit(d){var v=S.vit[d]||{};return {k:v.k||[],g:v.g||[],w:v.w==null?null:v.w,m:v.m||{}}}
+function rdgs(d,type){var v=vit(d);return type==='k'?v.k:type==='g'?v.g:(v.m[type.slice(2)]||[])}
+function dailyAvg(type,d){return avgOf(rdgs(d,type).map(function(x){return x.v}))}
+function metricDef(id){return S.metrics.filter(function(m){return m.id===id})[0]}
+var PRESETS=[
+  {key:'bodyfat',name:'Body fat',unit:'%',dec:1,re:/body\s*fat|bodyfat|fat\s*(%|percent|rate)|\bbf\b/i,lo:2,hi:70},
+  {key:'bmi',name:'BMI',unit:'',dec:1,re:/\bbmi\b|body mass index/i,lo:10,hi:80},
+  {key:'muscle',name:'Muscle mass',unit:'%',dec:1,re:/muscle/i,lo:10,hi:90},
+  {key:'water',name:'Body water',unit:'%',dec:1,re:/body\s*water|water\s*(%|percent)|hydration/i,lo:20,hi:90},
+  {key:'visceral',name:'Visceral fat',unit:'',dec:0,re:/visceral/i,lo:1,hi:60},
+  {key:'bone',name:'Bone mass',unit:'',dec:1,re:/bone/i,lo:0.5,hi:20},
+  {key:'waist',name:'Waist',unit:'in',dec:1,re:/waist/i,lo:15,hi:80},
+  {key:'hr',name:'Resting heart rate',unit:'bpm',dec:0,re:/heart\s*rate|pulse|resting\s*hr|\bbpm\b/i,lo:30,hi:220},
+  {key:'sys',name:'Systolic BP',unit:'mmHg',dec:0,re:/systolic|\bsys\b/i,lo:70,hi:260},
+  {key:'dia',name:'Diastolic BP',unit:'mmHg',dec:0,re:/diastolic|\bdia\b/i,lo:40,hi:160}
+];
+function ensureMetric(name,unit){
+  var nm=String(name).trim(),f=S.metrics.filter(function(m){return m.name.toLowerCase()===nm.toLowerCase()})[0];
+  if(f)return f;
+  var m={id:uid(),name:nm,unit:unit||'',dec:1};S.metrics.push(m);return m;
+}
 function readingChips(type){
-  var v=vit(ui.date)[type];
+  var v=rdgs(ui.date,type);
   if(!v.length)return '';
   return '<div class="rchips">'+v.map(function(r,i){return '<span class="rchip">'+r.v+' <span class="mut">'+esc(fmtTime(r.t))+'</span><button data-a="vdel" data-t="'+type+'" data-i="'+i+'" aria-label="Delete reading">✕</button></span>'}).join('')+'</div>';
 }
-function trendBlock(type,label,unit,color,dec){
-  var d=ui.date,days=[],i;
-  for(i=13;i>=0;i--)days.push(addDays(d,-i));
-  var series=days.map(function(x){var a=dailyAvg(type,x);return a==null?null:Math.round(a*100)/100});
-  var wk=[];for(i=6;i>=0;i--){var a=dailyAvg(type,addDays(d,-i));if(a!=null)wk.push(a)}
-  var a7=avgOf(wk);
-  var allReadings=[];for(i=6;i>=0;i--)vit(addDays(d,-i))[type].forEach(function(r){allReadings.push(r.v)});
-  var mn=allReadings.length?Math.min.apply(null,allReadings):null,mx=allReadings.length?Math.max.apply(null,allReadings):null;
-  return '<div class="hstat"><div><small>7-DAY AVG</small><b>'+(a7==null?'–':a7.toFixed(dec))+' <u>'+unit+'</u></b></div><div><small>7-DAY LOW / HIGH</small><b>'+(mn==null?'–':mn+' / '+mx)+'</b></div></div>'+spark(series,null,color)+'<div class="mut sm">Last 14 days, daily average</div>';
+
+/* ---------- charts ---------- */
+function niceTicks(lo,hi,n){
+  var span=hi-lo;if(span<=0)span=1;
+  var raw=span/n,mag=Math.pow(10,Math.floor(Math.log10(raw))),f=raw/mag,step=(f<1.5?1:f<3?2:f<7?5:10)*mag;
+  var a=Math.floor(lo/step)*step,b=Math.ceil(hi/step)*step,out=[];
+  for(var v=a;v<=b+step/2;v+=step)out.push(Math.round(v/step)*step);
+  return {ticks:out,lo:a,hi:b,step:step};
 }
-function weightBlock(){
-  var d=ui.date,days=[],i;
-  for(i=13;i>=0;i--)days.push(addDays(d,-i));
-  var series=days.map(function(x){var w=vit(x).w;return w==null?null:Math.round(wDisp(w)*10)/10});
-  var avgSeries=days.map(function(x){var ws=weightsIn(addDays(x,-6),x);return ws.length?Math.round(wDisp(avgOf(ws))*10)/10:null});
-  var cur=weightsIn(addDays(d,-6),d),prev=weightsIn(addDays(d,-13),addDays(d,-7));
-  var ca=avgOf(cur),pa=avgOf(prev),delta=ca!=null&&pa!=null?wDisp(ca)-wDisp(pa):null;
-  var u=S.units;
-  return '<div class="hstat"><div><small>7-DAY AVERAGE</small><b>'+(ca==null?'–':(Math.round(wDisp(ca)*10)/10).toFixed(1))+' <u>'+u+'</u></b></div><div><small>VS PRIOR 7 DAYS</small><b class="'+(delta==null?'':delta>0?'pos':'neg')+'">'+(delta==null?'–':(delta>0?'+':'')+delta.toFixed(1))+' <u>'+u+'</u></b></div></div>'+spark(series,avgSeries,'#fbae3c')+'<div class="mut sm">Last 14 days. Dots are weigh-ins, dashed line is the 7-day average.</div>';
+function chartSvg(o){
+  var W=340,H=o.H||214,L=38,R=12,T=12,B=26,i;
+  var xs=function(x){return L+(x-o.x0)/((o.x1-o.x0)||1)*(W-L-R)};
+  var ys=function(y){return T+(1-(y-o.y0)/((o.y1-o.y0)||1))*(H-T-B)};
+  var s='<svg class="chart" viewBox="0 0 '+W+' '+H+'" role="img" aria-label="'+esc(o.label||'Chart')+'">';
+  (o.yTicks||[]).forEach(function(v){var y=ys(v);s+='<line x1="'+L+'" x2="'+(W-R)+'" y1="'+y.toFixed(1)+'" y2="'+y.toFixed(1)+'" stroke="#1f2a38"/><text x="'+(L-5)+'" y="'+(y+3.5).toFixed(1)+'" text-anchor="end" font-size="9.5" fill="#7f8da0">'+o.yFmt(v)+'</text>'});
+  var nx=4;
+  for(i=0;i<=nx;i++){var xv=Math.round(o.x0+(o.x1-o.x0)*i/nx);s+='<text x="'+xs(xv).toFixed(1)+'" y="'+(H-8)+'" text-anchor="'+(i===0?'start':i===nx?'end':'middle')+'" font-size="9.5" fill="#7f8da0">'+dnLabel(xv)+'</text>'}
+  (o.vlines||[]).forEach(function(v){if(v.x<o.x0||v.x>o.x1)return;var x=xs(v.x);s+='<line x1="'+x.toFixed(1)+'" x2="'+x.toFixed(1)+'" y1="'+T+'" y2="'+(H-B)+'" stroke="'+v.color+'" stroke-dasharray="3 3" opacity=".8"/>'});
+  (o.hlines||[]).forEach(function(h){var y=ys(h.y);s+='<line x1="'+L+'" x2="'+(W-R)+'" y1="'+y.toFixed(1)+'" y2="'+y.toFixed(1)+'" stroke="'+h.color+'" stroke-dasharray="5 4" stroke-width="1.4"/>'});
+  (o.series||[]).forEach(function(se){
+    if(se.line&&se.pts.length>1){
+      var d='';se.pts.forEach(function(p,j){d+=(j?'L':'M')+xs(p[0]).toFixed(1)+' '+ys(p[1]).toFixed(1)});
+      s+='<path d="'+d+'" fill="none" stroke="'+se.color+'" stroke-width="'+(se.width||2)+'"'+(se.dash?' stroke-dasharray="'+se.dash+'"':'')+' stroke-linejoin="round" stroke-linecap="round"'+(se.opacity?' opacity="'+se.opacity+'"':'')+'/>';
+    }
+    if(se.dots)se.pts.forEach(function(p){s+='<circle cx="'+xs(p[0]).toFixed(1)+'" cy="'+ys(p[1]).toFixed(1)+'" r="'+(se.r||2.6)+'" fill="'+se.color+'"/>'});
+  });
+  (o.marks||[]).forEach(function(m){
+    var x=xs(m.x),y=ys(m.y),anchor=x>W-70?'end':'start';
+    s+='<circle cx="'+x.toFixed(1)+'" cy="'+y.toFixed(1)+'" r="4.2" fill="'+m.color+'" stroke="#0a0e13" stroke-width="1.5"/><text x="'+(anchor==='end'?x-7:x+7).toFixed(1)+'" y="'+(y-7).toFixed(1)+'" text-anchor="'+anchor+'" font-size="10.5" font-weight="700" fill="'+m.color+'">'+esc(m.label)+'</text>';
+  });
+  return s+'</svg>';
 }
 
-/* weekly summary */
+/* ---------- weight trend and goal projection ---------- */
+function weighIns(){return Object.keys(S.vit).filter(function(d){return S.vit[d]&&S.vit[d].w!=null}).sort().map(function(d){return {d:d,x:dn(d),w:S.vit[d].w}})}
+function emaSeries(pts,alpha){
+  var by={},out=[],tr=null,lastX=null;
+  pts.forEach(function(p){by[p.x]=p.w});
+  for(var x=pts[0].x;x<=pts[pts.length-1].x;x++){
+    if(by[x]!=null){if(tr==null)tr=by[x];else{tr=tr+(1-Math.pow(1-alpha,x-lastX))*(by[x]-tr)}lastX=x}
+    out.push({x:x,t:tr});
+  }
+  return out;
+}
+function regress(pts){
+  var n=pts.length,mx=0,mw=0,i;
+  pts.forEach(function(p){mx+=p.x;mw+=p.w});mx/=n;mw/=n;
+  var sxx=0,sxy=0;pts.forEach(function(p){sxx+=(p.x-mx)*(p.x-mx);sxy+=(p.x-mx)*(p.w-mw)});
+  return sxx>0?sxy/sxx:0;
+}
+function goalProj(){
+  var pts=weighIns(),r={pts:pts,hasGoal:!!(S.goalW&&S.goalDate),slope:null};
+  if(!pts.length){r.none=true;return r}
+  r.ema=emaSeries(pts,0.15);
+  r.last=pts[pts.length-1];r.trend=r.ema[r.ema.length-1].t;
+  var win=pts.filter(function(p){return p.x>=r.last.x-S.trendDays+1});
+  r.n=win.length;r.span=win.length?win[win.length-1].x-win[0].x:0;
+  if(win.length>=4&&r.span>=6)r.slope=regress(win);
+  r.startW=S.goalStartW||pts[0].w;
+  if(r.hasGoal){
+    var gx=dn(S.goalDate),tx=dn(today());
+    r.daysLeft=gx-tx;r.dir=S.goalW<r.startW?-1:1;
+    r.reached=r.dir<0?r.trend<=S.goalW:r.trend>=S.goalW;
+    r.toGoalLb=S.goalW-r.trend;
+    var span=r.startW-S.goalW;
+    r.pct=Math.abs(span)>0.05?Math.max(0,Math.min(100,(r.startW-r.trend)/span*100)):100;
+    r.needWeek=(gx-r.last.x)>0?(S.goalW-r.trend)/((gx-r.last.x)/7):null;
+    if(r.slope!=null){
+      r.projTarget=r.trend+r.slope*(gx-r.last.x);
+      r.onPace=r.dir<0?r.projTarget<=S.goalW:r.projTarget>=S.goalW;
+      if(!r.reached&&r.slope*r.dir>0){r.hitX=r.last.x+Math.ceil((S.goalW-r.trend)/r.slope)}
+    }
+  }
+  return r;
+}
+function projAt(gp,x){return gp.trend+gp.slope*(x-gp.last.x)}
+function signedW(lb,dec){var v=wDisp(lb);return (v>0?'+':'')+v.toFixed(dec==null?1:dec)}
+function goalCardHtml(){
+  var gp=goalProj(),u=S.units,h='<div class="sec-head" style="margin:0 0 8px"><div class="eyebrow">WEIGHT GOAL</div><button class="btn sm" data-a="goaledit">'+(gp.hasGoal?'Edit goal':'Set goal')+'</button></div>';
+  if(!gp.hasGoal){
+    return h+'<div class="mut sm">Set a goal weight and a target date to see your trend, the date you are on pace to reach it, and your projected weight on the target date.</div>';
+  }
+  h+='<div class="goalline"><b>'+wFmt(S.goalW)+' '+u+'</b> by <b>'+esc(dnLabelY(dn(S.goalDate)))+'</b><span class="mut sm"> · '+(gp.daysLeft>0?gp.daysLeft+' days left':gp.daysLeft===0?'target date is today':'target date passed')+'</span></div>';
+  if(gp.none){return h+'<div class="empty" style="margin-top:8px">Log a weigh-in to start tracking toward this goal.</div>'}
+  h+='<div class="track" style="margin-top:10px;height:9px"><div class="fill" style="width:'+gp.pct+'%;background:linear-gradient(90deg,var(--blue),var(--teal))"></div></div><div class="mut sm" style="display:flex;justify-content:space-between;margin-top:5px"><span>Start '+wFmt(gp.startW)+'</span><span>'+r0(gp.pct)+'% there</span><span>Goal '+wFmt(S.goalW)+'</span></div>';
+  var rate=gp.slope==null?null:gp.slope*7;
+  h+='<div class="tiles2">'+
+    '<div class="tile"><div class="tl">TREND WEIGHT</div><b>'+wFmt(gp.trend)+'<small> '+u+'</small></b><div class="ts">'+(gp.reached?'Goal reached':signedW(gp.toGoalLb)+' '+u+' to go')+'</div></div>'+
+    '<div class="tile"><div class="tl">RATE (LAST '+Math.min(S.trendDays,Math.max(gp.span+1,1))+' DAYS)</div><b class="'+(rate==null?'':(rate*gp.dir>0?'neg':'pos'))+'">'+(rate==null?'–':signedW(rate,2))+'<small> '+u+'/wk</small></b><div class="ts">'+(rate==null?'Need 4+ weigh-ins over 7+ days':gp.n+' weigh-ins')+'</div></div>'+
+    '<div class="tile"><div class="tl">PROJECTED ON TARGET DATE</div><b>'+(gp.projTarget==null?'–':wFmt(gp.projTarget))+'<small> '+u+'</small></b><div class="ts">'+(gp.projTarget==null?'':gp.onPace?'Meets goal by '+Math.abs(wDisp(gp.projTarget)-wDisp(S.goalW)).toFixed(1)+' '+u:'Misses goal by '+Math.abs(wDisp(gp.projTarget)-wDisp(S.goalW)).toFixed(1)+' '+u)+'</div></div>'+
+    '<div class="tile"><div class="tl">PROJECTED GOAL DATE</div><b style="font-size:17px">'+(gp.reached?'Reached':gp.hitX==null?'Not on pace':esc(dnLabelY(gp.hitX)))+'</b><div class="ts">'+(gp.hitX!=null?(gp.hitX<=dn(S.goalDate)?Math.round(dn(S.goalDate)-gp.hitX)+' days ahead of target':Math.round(gp.hitX-dn(S.goalDate))+' days after target'):gp.reached?'':'Current trend is not heading to the goal')+'</div></div></div>';
+  var msg='';
+  if(gp.reached)msg='<span class="neg">Your trend weight has reached your goal.</span>';
+  else if(gp.slope==null)msg='Log your weight on 4 or more days across at least a week and the projection will appear.';
+  else if(gp.onPace)msg='<span class="neg">On pace.</span> At your current rate you finish at about '+wFmt(gp.projTarget)+' '+u+' on the target date.';
+  else if(gp.needWeek!=null)msg='<span class="pos">Behind pace.</span> You need about '+signedW(gp.needWeek,2)+' '+u+'/wk from here to hit the target date; you are at '+signedW(gp.slope*7,2)+' '+u+'/wk.';
+  h+='<div class="note" style="margin:2px 0 4px;color:var(--tx)">'+msg+'</div>';
+  if(gp.slope!=null){
+    var rows='',tx=dn(today());
+    for(var i=1;i<=7;i++){var x=tx+i;rows+='<tr><td>'+esc(dnLabel(x))+'</td><td>'+wFmt(projAt(gp,x))+' '+u+'</td></tr>'}
+    h+='<div class="eyebrow" style="margin:10px 0 2px">DAILY PROJECTION, NEXT 7 DAYS</div><div class="wk"><table>'+rows+'</table></div>';
+  }
+  h+='<div class="chiprow" style="align-items:center"><span class="mut sm">Trend window</span>'+[14,28,60].map(function(n){return '<button class="pill'+(S.trendDays===n?' on':'')+'" data-a="twin" data-n="'+n+'">'+n+' days</button>'}).join('')+'</div>';
+  return h;
+}
+function weightChartHtml(){
+  var gp=goalProj(),pts=gp.pts,u=S.units;
+  var rangeChips='<div class="chiprow" style="margin:0 0 4px">'+[['30','30D'],['90','90D'],['all','All']].concat(gp.hasGoal?[['goal','To goal']]:[]).map(function(x){return '<button class="pill'+(ui.wr===x[0]?' on':'')+'" data-a="wrange" data-r="'+x[0]+'">'+x[1]+'</button>'}).join('')+'</div>';
+  if(!pts.length)return rangeChips+'<div class="empty">Log your weight to see the chart.</div>';
+  var tx=dn(today()),x0,x1,r=ui.wr;
+  if(r==='goal'&&gp.hasGoal){x1=Math.max(dn(S.goalDate),tx+7);x0=Math.min(Math.max(pts[0].x,tx-90),tx-14)}
+  else if(r==='90'){x0=tx-90;x1=tx+7}
+  else if(r==='all'){x0=Math.min(pts[0].x,tx-14);x1=tx+7}
+  else{x0=tx-30;x1=tx+7}
+  var dv=wDisp,vis=pts.filter(function(p){return p.x>=x0&&p.x<=x1});
+  var ema=gp.ema.filter(function(p){return p.x>=x0&&p.x<=x1&&p.t!=null});
+  var series=[{pts:vis.map(function(p){return [p.x,dv(p.w)]}),color:'#fbae3c',dots:true,r:2.8},{pts:ema.map(function(p){return [p.x,dv(p.t)]}),color:'#e8eef5',line:true,width:2.2}];
+  var ys=vis.map(function(p){return dv(p.w)}).concat(ema.map(function(p){return dv(p.t)})),marks=[],hl=[],vl=[];
+  if(gp.slope!=null&&gp.last.x<=x1){
+    var pEnd=projAt(gp,x1);
+    series.push({pts:[[gp.last.x,dv(gp.trend)],[x1,dv(pEnd)]],color:'#fbae3c',line:true,width:2,dash:'6 4'});
+    ys.push(dv(pEnd));
+    if(gp.hasGoal&&dn(S.goalDate)===x1)marks.push({x:x1,y:dv(pEnd),color:'#fbae3c',label:wFmt(pEnd)+' '+u});
+  }
+  if(gp.hasGoal){
+    hl.push({y:dv(S.goalW),color:'#2ee6b6'});ys.push(dv(S.goalW));
+    vl.push({x:dn(S.goalDate),color:'#2ee6b6'});
+    if(gp.hitX!=null&&gp.hitX>=x0&&gp.hitX<=x1)marks.push({x:gp.hitX,y:dv(S.goalW),color:'#2ee6b6',label:dnLabel(gp.hitX)});
+  }
+  if(!ys.length)return rangeChips+'<div class="empty">No weigh-ins in this range.</div>';
+  var lo=Math.min.apply(null,ys),hi=Math.max.apply(null,ys),pad2=(hi-lo)*0.1||1,nt=niceTicks(lo-pad2,hi+pad2,4);
+  var svg=chartSvg({x0:x0,x1:x1,y0:nt.lo,y1:nt.hi,yTicks:nt.ticks,yFmt:function(v){return nt.step<1?v.toFixed(1):String(Math.round(v))},series:series,hlines:hl,vlines:vl,marks:marks,label:'Weight chart'});
+  var leg='<div class="legend"><span><i style="background:#fbae3c"></i>Weigh-in</span><span><i style="background:#e8eef5"></i>Trend</span>'+(gp.slope!=null?'<span><i class="dash" style="border-color:#fbae3c"></i>Projection</span>':'')+(gp.hasGoal?'<span><i class="dash" style="border-color:#2ee6b6"></i>Goal</span>':'')+'</div>';
+  return rangeChips+svg+leg;
+}
+
+/* ---------- metric charts (ketones, glucose, custom) ---------- */
+function metricCardHtml(type,title,unit,color,dec){
+  var tx=dn(today()),N=Number(ui.mr),x0=tx-N,x1=tx,i;
+  var daily=[],roll=[],all=[];
+  for(var x=x0;x<=x1;x++){
+    var a=dailyAvg(type,fromDn(x));if(a!=null){daily.push([x,a]);all.push(a)}
+  }
+  for(x=x0;x<=x1;x++){
+    var win=[];for(i=0;i<7;i++){var v=dailyAvg(type,fromDn(x-i));if(v!=null)win.push(v)}
+    if(win.length)roll.push([x,avgOf(win)]);
+  }
+  var wk=[],raw=[];
+  for(i=0;i<7;i++){var vv=dailyAvg(type,fromDn(tx-i));if(vv!=null)wk.push(vv);rdgs(fromDn(tx-i),type).forEach(function(r){raw.push(r.v)})}
+  var a7=avgOf(wk),mn=raw.length?Math.min.apply(null,raw):null,mx=raw.length?Math.max.apply(null,raw):null;
+  var h='<div class="eyebrow">'+esc(title.toUpperCase())+(unit?' ('+esc(unit)+')':'')+'</div><div class="hstat"><div><small>7-DAY AVG</small><b>'+(a7==null?'–':a7.toFixed(dec))+'</b></div><div><small>7-DAY LOW / HIGH</small><b>'+(mn==null?'–':mn+' / '+mx)+'</b></div></div>';
+  if(!all.length)return h+'<div class="empty">No readings in the last '+N+' days.</div>';
+  var lo=Math.min.apply(null,all),hi=Math.max.apply(null,all),p2=(hi-lo)*0.15||Math.max(0.5,hi*0.1),nt=niceTicks(Math.max(0,lo-p2),hi+p2,4);
+  h+=chartSvg({H:176,x0:x0,x1:x1,y0:nt.lo,y1:nt.hi,yTicks:nt.ticks,yFmt:function(v){return nt.step<1?v.toFixed(1):String(Math.round(v))},series:[{pts:daily,color:color,dots:true,r:2.8},{pts:roll,color:'#e8eef5',line:true,width:2,dash:'5 4'}],label:title+' chart'});
+  return h+'<div class="legend"><span><i style="background:'+color+'"></i>Daily average</span><span><i class="dash" style="border-color:#e8eef5"></i>7-day average</span></div>';
+}
+function metricsChartsHtml(){
+  var chipsH='<div class="sec-head" style="margin:4px 2px 8px"><div class="eyebrow">TRENDS</div><div class="chiprow" style="margin:0">'+[['14','14D'],['30','30D'],['90','90D']].map(function(x){return '<button class="pill'+(ui.mr===x[0]?' on':'')+'" data-a="mrange" data-r="'+x[0]+'">'+x[1]+'</button>'}).join('')+'</div></div>';
+  var h=chipsH+'<div class="card">'+metricCardHtml('k','Ketones','mmol/L','#2ee6b6',1)+'</div><div class="card">'+metricCardHtml('g','Glucose','mg/dL','#38bdf8',0)+'</div>';
+  S.metrics.forEach(function(m){h+='<div class="card">'+metricCardHtml('m:'+m.id,m.name,m.unit,'#b794f6',m.dec==null?1:m.dec)+'</div>'});
+  return h;
+}
+
+/* ---------- weekly summary ---------- */
 function weekData(start){
   var days=[],i;for(i=0;i<7;i++)days.push(addDays(start,i));
   var end=days[6],logged=days.filter(function(d){return dayTotals(d).k>=MIN_KCAL});
@@ -834,16 +1018,12 @@ function weekData(start){
   var kr=[],gr=[];days.forEach(function(d){vit(d).k.forEach(function(r){kr.push(r.v)});vit(d).g.forEach(function(r){gr.push(r.v)})});
   var fs=S.fasts.filter(function(f){var d=dstr(new Date(f.end));return d>=start&&d<=end});
   var wat=days.map(waterTotal).filter(function(x){return x>0});
+  var ms=S.metrics.map(function(m){var vals=[];days.forEach(function(d){rdgs(d,'m:'+m.id).forEach(function(r){vals.push(r.v)})});return {m:m,avg:avgOf(vals),n:vals.length}}).filter(function(x){return x.n});
   return {start:start,end:end,n:n,under:under,avg:n?{k:tot.k/n,nc:tot.nc/n,p:tot.p/n,f:tot.f/n,fi:tot.fi/n}:null,
     wFirst:wd.length?wd[0].w:null,wLast:wd.length?wd[wd.length-1].w:null,wCount:wd.length,wAvg:avgOf(wd.map(function(x){return x.w})),wPrev:avgOf(pw),
     kAvg:avgOf(kr),kN:kr.length,gAvg:avgOf(gr),gN:gr.length,fN:fs.length,fAvg:fs.length?fs.reduce(function(a,f){return a+f.end-f.start},0)/fs.length:null,fHit:fs.filter(function(f){return f.end-f.start>=S.fastGoal*3600000}).length,
-    water:avgOf(wat)};
+    water:avgOf(wat),ms:ms};
 }
-function rangeLabel(w){
-  var a=parseD(w.start),b=parseD(w.end),o={month:'short',day:'numeric'};
-  return a.toLocaleDateString(undefined,o)+' – '+b.toLocaleDateString(undefined,o);
-}
-function signed(n,dec){return (n>0?'+':'')+n.toFixed(dec)}
 function weekText(w){
   var L=['MacroPulse weekly summary: '+rangeLabel(w)];
   L.push('Days logged: '+w.n+' of 7 (days with '+MIN_KCAL+'+ kcal)');
@@ -862,8 +1042,11 @@ function weekText(w){
   }
   if(w.kN)L.push('Avg ketones: '+w.kAvg.toFixed(1)+' mmol/L ('+w.kN+' reading'+(w.kN>1?'s':'')+')');
   if(w.gN)L.push('Avg glucose: '+r0(w.gAvg)+' mg/dL ('+w.gN+' reading'+(w.gN>1?'s':'')+')');
+  w.ms.forEach(function(x){L.push('Avg '+x.m.name.toLowerCase()+': '+x.avg.toFixed(x.m.dec==null?1:x.m.dec)+(x.m.unit?' '+x.m.unit:'')+' ('+x.n+' reading'+(x.n>1?'s':'')+')')});
   if(w.fN)L.push('Fasts: '+w.fN+', average '+fmtDur(w.fAvg)+', '+w.fHit+' reached '+fmt(S.fastGoal)+'h');
   if(w.water!=null)L.push('Avg water: '+r0(w.water).toLocaleString()+' ml');
+  var gp=goalProj();
+  if(gp.hasGoal&&!gp.none&&gp.slope!=null)L.push('Goal: '+wFmt(S.goalW)+' '+u+' by '+dnLabelY(dn(S.goalDate))+'; trend '+wFmt(gp.trend)+' '+u+' at '+signedW(gp.slope*7,2)+' '+u+'/wk; projected '+wFmt(gp.projTarget)+' '+u+' on the target date');
   return L.join('\n');
 }
 function weeklyHtml(){
@@ -882,6 +1065,7 @@ function weeklyHtml(){
   }
   if(w.kN)row('Avg ketones',w.kAvg.toFixed(1)+' mmol/L',w.kN+' reading'+(w.kN>1?'s':''));
   if(w.gN)row('Avg glucose',r0(w.gAvg)+' mg/dL',w.gN+' reading'+(w.gN>1?'s':''));
+  w.ms.forEach(function(x){row('Avg '+esc(x.m.name.toLowerCase()),x.avg.toFixed(x.m.dec==null?1:x.m.dec)+(x.m.unit?' '+esc(x.m.unit):''),x.n+' reading'+(x.n>1?'s':''))});
   if(w.fN)row('Fasts',w.fN,'Avg '+fmtDur(w.fAvg)+' · '+w.fHit+' reached '+fmt(S.fastGoal)+'h');
   if(w.water!=null)row('Avg water',r0(w.water).toLocaleString()+' ml');
   return '<div class="sec-head" style="margin:0"><div class="eyebrow">WEEKLY SUMMARY</div><div style="display:flex;align-items:center;gap:6px"><button class="iconbtn" style="width:32px;height:32px" data-a="wkprev" aria-label="Previous week"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#e8eef5" stroke-width="2.4" stroke-linecap="round"><path d="M15 5l-7 7 7 7"/></svg></button><b style="font-size:13px;min-width:112px;text-align:center">'+esc(rangeLabel(w))+'</b><button class="iconbtn" style="width:32px;height:32px;'+(isCur?'opacity:.35':'')+'" data-a="wknext" aria-label="Next week"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#e8eef5" stroke-width="2.4" stroke-linecap="round"><path d="M9 5l7 7-7 7"/></svg></button></div></div>'+
@@ -889,30 +1073,294 @@ function weeklyHtml(){
     '<div class="btnrow"><button class="btn" data-a="wkcopy">Copy summary</button>'+(navigator.share?'<button class="btn primary" data-a="wkshare">Share</button>':'')+'</div>';
 }
 
+/* ---------- Health tab ---------- */
+function otherInputs(){
+  return S.metrics.map(function(m){
+    var t='m:'+m.id;
+    return '<div class="hrow" style="margin-top:12px"><div class="field"><label for="hv-m-'+m.id+'">'+esc(m.name)+(m.unit?' ('+esc(m.unit)+')':'')+'</label><input class="inp" id="hv-m-'+m.id+'" inputmode="decimal"></div><button class="btn primary" data-a="vadd" data-t="'+t+'">Add</button></div>'+readingChips(t);
+  }).join('');
+}
 function renderHealth(){
   var d=ui.date,v=vit(d),u=S.units;
   var h=dateNavHtml();
-  h+='<div class="card" id="fast-full">'+fastFullHtml()+'</div>';
-  h+='<div class="card"><div class="eyebrow" style="margin-bottom:10px">DAILY CHECK-IN</div>'+
+  h+='<div class="card"><div class="sec-head" style="margin:0 0 10px"><div class="eyebrow">DAILY CHECK-IN</div><button class="btn sm" data-a="photo">Import from photo</button></div>'+
+    '<input type="file" id="photo-in" accept="image/*" multiple style="display:none">'+
     '<div class="hrow"><div class="field"><label for="hv-w">Weight ('+u+')</label><input class="inp" id="hv-w" inputmode="decimal" placeholder="'+(v.w!=null?wFmt(v.w):'e.g. 214.6')+'"></div><button class="btn primary" data-a="vadd" data-t="w">'+(v.w!=null?'Update':'Save')+'</button></div>'+
     (v.w!=null?'<div class="rchips"><span class="rchip">'+wFmt(v.w)+' '+u+'<button data-a="vdel" data-t="w" aria-label="Delete weight">✕</button></span></div>':'')+
     '<div class="hrow" style="margin-top:12px"><div class="field"><label for="hv-k">Ketones (mmol/L)</label><input class="inp" id="hv-k" inputmode="decimal" placeholder="e.g. 0.7"></div><button class="btn primary" data-a="vadd" data-t="k">Add</button></div>'+readingChips('k')+
-    '<div class="hrow" style="margin-top:12px"><div class="field"><label for="hv-g">Glucose (mg/dL)</label><input class="inp" id="hv-g" inputmode="decimal" placeholder="e.g. 112"></div><button class="btn primary" data-a="vadd" data-t="g">Add</button></div>'+readingChips('g')+'</div>';
-  h+='<div class="card"><div class="eyebrow">WEIGHT TREND</div>'+weightBlock()+'</div>';
-  h+='<div class="card"><div class="eyebrow">KETONES</div>'+trendBlock('k','Ketones','mmol/L','#2ee6b6',1)+'</div>';
-  h+='<div class="card"><div class="eyebrow">GLUCOSE</div>'+trendBlock('g','Glucose','mg/dL','#38bdf8',0)+'</div>';
+    '<div class="hrow" style="margin-top:12px"><div class="field"><label for="hv-g">Glucose (mg/dL)</label><input class="inp" id="hv-g" inputmode="decimal" placeholder="e.g. 112"></div><button class="btn primary" data-a="vadd" data-t="g">Add</button></div>'+readingChips('g')+
+    otherInputs()+
+    '<button class="btn sm" style="width:100%;margin-top:14px" data-a="metricadd">+ Track another measurement</button></div>';
+  h+='<div class="card" id="goal-card">'+goalCardHtml()+'</div>';
+  h+='<div class="card"><div class="eyebrow" style="margin-bottom:4px">WEIGHT TREND AND PROJECTION</div><div id="w-chart">'+weightChartHtml()+'</div></div>';
+  h+='<div id="m-charts">'+metricsChartsHtml()+'</div>';
+  h+='<div class="card" id="fast-full">'+fastFullHtml()+'</div>';
   h+='<div class="card" id="wk-card">'+weeklyHtml()+'</div>';
-  h+='<div class="note" style="margin:4px 2px 12px">Net-carb streak: a day counts when you log at least '+MIN_KCAL+' kcal and stay at or under your net carb goal. Readings are for your own tracking and are not medical advice.</div>';
+  h+='<div class="note" style="margin:4px 2px 12px">Net-carb streak: a day counts when you log at least '+MIN_KCAL+' kcal and stay at or under your net carb goal. Projections extend your recent trend and are estimates, not medical advice.</div>';
   return h;
 }
-function copyText(t){
-  if(navigator.clipboard&&navigator.clipboard.writeText){return navigator.clipboard.writeText(t)}
-  return new Promise(function(res,rej){
-    var a=document.createElement('textarea');a.value=t;a.style.position='fixed';a.style.opacity='0';document.body.appendChild(a);a.select();
-    try{document.execCommand('copy')?res():rej()}catch(e){rej(e)}a.remove();
+
+/* ---------- goal and metric sheets ---------- */
+function openGoalSheet(){
+  var u=S.units,gp=goalProj(),def=new Date();def.setDate(def.getDate()+90);
+  var el=sheet('<div class="sh-h"><div class="eyebrow">WEIGHT GOAL</div><button class="x" data-a="close">✕</button></div>'+
+    '<div class="field"><label for="gl-w">Goal weight ('+u+')</label><input class="inp" id="gl-w" inputmode="decimal" value="'+(S.goalW?wFmt(S.goalW):'')+'" placeholder="e.g. 195"></div>'+
+    '<div class="field"><label for="gl-d">Target date</label><input class="inp" id="gl-d" type="date" value="'+(S.goalDate||dstr(def))+'" min="'+today()+'"></div>'+
+    '<div class="field"><label for="gl-s">Starting weight ('+u+', optional)</label><input class="inp" id="gl-s" inputmode="decimal" value="'+(S.goalStartW?wFmt(S.goalStartW):'')+'" placeholder="'+(gp.pts&&gp.pts.length?wFmt(gp.pts[0].w)+' (your first logged weight)':'defaults to your first logged weight')+'"></div>'+
+    '<div class="btnrow">'+(S.goalW?'<button class="btn danger" id="gl-clr">Remove goal</button>':'')+'<button class="btn primary" id="gl-ok">Save goal</button></div>');
+  $('#gl-ok',el).addEventListener('click',function(){
+    var gw=wFrom(num($('#gl-w',el).value)),gd=$('#gl-d',el).value,sw=num($('#gl-s',el).value);
+    if(gw<50||gw>700){toast('Enter a goal weight');return}
+    if(!gd||gd<=today()){toast('Pick a target date in the future');return}
+    S.goalW=Math.round(gw*100)/100;S.goalDate=gd;S.goalStartW=sw>0?Math.round(wFrom(sw)*100)/100:null;
+    save();closeSheet();render();toast('Goal saved');
+  });
+  var c=$('#gl-clr',el);
+  if(c)c.addEventListener('click',function(){S.goalW=null;S.goalDate=null;S.goalStartW=null;save();closeSheet();render();toast('Goal removed')});
+}
+function openMetricSheet(){
+  var have=S.metrics.map(function(m){return m.name.toLowerCase()});
+  var el=sheet('<div class="sh-h"><div class="eyebrow">TRACK ANOTHER MEASUREMENT</div><button class="x" data-a="close">✕</button></div><div class="chiprow" style="margin:0 0 14px">'+PRESETS.filter(function(p){return have.indexOf(p.name.toLowerCase())<0}).map(function(p){return '<button class="pill" data-preset="'+p.key+'">'+esc(p.name)+(p.unit?' ('+esc(p.unit)+')':'')+'</button>'}).join('')+'</div>'+
+    '<div class="eyebrow" style="margin-bottom:8px">OR CREATE YOUR OWN</div><div class="grid2"><div class="field"><label for="mt-n">Name</label><input class="inp" id="mt-n" type="text" placeholder="e.g. Neck"></div><div class="field"><label for="mt-u">Unit</label><input class="inp" id="mt-u" type="text" placeholder="e.g. in"></div></div><button class="btn primary" style="width:100%" id="mt-ok">Add measurement</button>'+
+    (S.metrics.length?'<div class="sep"></div><div class="eyebrow" style="margin-bottom:8px">YOUR MEASUREMENTS</div>'+S.metrics.map(function(m){return '<div class="rowitem"><div class="rn">'+esc(m.name)+(m.unit?' <span class="mut">('+esc(m.unit)+')</span>':'')+'</div><button class="pill" style="color:var(--red)" data-mdel="'+m.id+'">Remove</button></div>'}).join(''):''));
+  el.addEventListener('click',function(ev){
+    var t=ev.target;
+    if(t.dataset.preset){var p=PRESETS.filter(function(x){return x.key===t.dataset.preset})[0];ensureMetric(p.name,p.unit).dec=p.dec;save();closeSheet();render();toast('Added '+p.name)}
+    if(t.dataset.mdel){if(!confirm('Remove this measurement and all of its readings?'))return;var id=t.dataset.mdel;S.metrics=S.metrics.filter(function(m){return m.id!==id});for(var d in S.vit){if(S.vit[d].m)delete S.vit[d].m[id]}save();closeSheet();render()}
+  });
+  $('#mt-ok',el).addEventListener('click',function(){
+    var n=$('#mt-n',el).value.trim();if(!n){toast('Enter a name');return}
+    ensureMetric(n,$('#mt-u',el).value.trim());save();closeSheet();render();toast('Added '+n);
   });
 }
-setInterval(tickFast,30000);
+
+/* ---------- photo import (reads numbers on the phone, nothing is uploaded) ---------- */
+var absUrl=function(p){return new URL(p,location.href).href};
+function loadScript(src){
+  return new Promise(function(res,rej){
+    if(document.querySelector('script[data-src="'+src+'"]'))return res();
+    var sc=document.createElement('script');sc.src=src;sc.dataset.src=src;sc.onload=function(){res()};sc.onerror=function(){rej(new Error('load '+src))};
+    document.head.appendChild(sc);
+  });
+}
+function fileToCanvas(file){
+  function fromBmp(bmp,w,h){
+    var m=Math.max(w,h),sc=m>2400?2400/m:m<1400?Math.min(2,1400/m):1,c=document.createElement('canvas');
+    c.width=Math.round(w*sc);c.height=Math.round(h*sc);c.getContext('2d').drawImage(bmp,0,0,c.width,c.height);return c;
+  }
+  if(window.createImageBitmap){
+    return createImageBitmap(file,{imageOrientation:'from-image'}).catch(function(){return createImageBitmap(file)}).then(function(b){return fromBmp(b,b.width,b.height)});
+  }
+  return new Promise(function(res,rej){var im=new Image(),u=URL.createObjectURL(file);im.onload=function(){res(fromBmp(im,im.naturalWidth,im.naturalHeight));URL.revokeObjectURL(u)};im.onerror=rej;im.src=u});
+}
+function prepForOcr(canvas,invert){
+  var c=document.createElement('canvas');c.width=canvas.width;c.height=canvas.height;
+  var x=c.getContext('2d');x.drawImage(canvas,0,0);
+  var im=x.getImageData(0,0,c.width,c.height),d=im.data,i,sum=0,n=d.length/4,lum=new Uint8Array(n);
+  for(i=0;i<n;i++){var l=0.299*d[i*4]+0.587*d[i*4+1]+0.114*d[i*4+2];lum[i]=l;sum+=l}
+  var mean=sum/n,dark=mean<115,inv=invert==null?dark:invert,lo=255,hi=0;
+  for(i=0;i<n;i++){if(lum[i]<lo)lo=lum[i];if(lum[i]>hi)hi=lum[i]}
+  var rg=Math.max(40,hi-lo);
+  for(i=0;i<n;i++){var v=(lum[i]-lo)/rg*255;v=v<0?0:v>255?255:v;if(inv)v=255-v;d[i*4]=d[i*4+1]=d[i*4+2]=v;d[i*4+3]=255}
+  x.putImageData(im,0,0);return {canvas:c,dark:dark};
+}
+var MONTHS='jan feb mar apr may jun jul aug sep oct nov dec'.split(' ');
+function findDate(text){
+  var t=today(),lines=text.split(/\n/),best=null;
+  for(var i=0;i<lines.length&&!best;i++){
+    var L=lines[i],m;
+    if(/\btoday\b/i.test(L)){best=t;break}
+    if(/\byesterday\b/i.test(L)){best=addDays(t,-1);break}
+    if((m=L.match(/\b(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\.?\s+(\d{1,2})(?:st|nd|rd|th)?(?:,?\s*(\d{4}))?/i))){
+      var mo=MONTHS.indexOf(m[1].toLowerCase())+1,dd=Number(m[2]),yy=m[3]?Number(m[3]):new Date().getFullYear();
+      var cand=yy+'-'+pad(mo)+'-'+pad(dd);if(cand>t&&!m[3])cand=(yy-1)+'-'+pad(mo)+'-'+pad(dd);
+      if(dd>=1&&dd<=31&&cand<=t&&dn(t)-dn(cand)<400){best=cand;break}
+    }
+    if((m=L.match(/\b(\d{1,2})[\/\-](\d{1,2})(?:[\/\-](\d{2,4}))?\b/))){
+      var a=Number(m[1]),b=Number(m[2]),y2=m[3]?Number(m[3]):new Date().getFullYear();if(y2<100)y2+=2000;
+      if(a>=1&&a<=12&&b>=1&&b<=31){var c2=y2+'-'+pad(a)+'-'+pad(b);if(c2>t&&!m[3])c2=(y2-1)+'-'+pad(a)+'-'+pad(b);if(c2<=t&&dn(t)-dn(c2)<400){best=c2;break}}
+    }
+  }
+  return best;
+}
+var KEYS=[
+  {m:'k',re:/ketone|\bbhb\b|beta[\s-]?hydroxy|\bbhb\b|\bkb\b|blood\s*ketone/i},
+  {m:'g',re:/glucose|blood\s*sugar|\bbg\b|\bglu\b|\bcgm\b/i},
+  {m:'w',re:/weight|\bwt\b|\bscale\b|body\s*weight/i}
+];
+function parseOcr(text){
+  var lines=text.split(/\n+/).map(function(s){return s.replace(/[|_]/g,' ').trim()}).filter(Boolean),rows=[],seen={};
+  var numRe=/(\d{1,4}(?:[.,]\d{1,2})?)\s*(mmol\s*\/?\s*l|mg\s*\/?\s*d\s*l|[li]bs?|kg|%|bpm|mmhg|cm|in)?/gi;
+  function add(m,v,label,unit,extra){
+    var key=m+'|'+v;if(seen[key])return;seen[key]=1;
+    rows.push({m:m,v:v,label:label,unit:unit||'',on:true,extra:extra||null});
+  }
+  function ctxMetric(ctx){
+    var best=null,bi=-1,p;
+    KEYS.forEach(function(k){var mm=ctx.match(k.re);if(mm&&mm.index>bi){bi=mm.index;best={m:k.m}}});
+    PRESETS.forEach(function(pr){var mm=ctx.match(pr.re);if(mm&&mm.index>bi){bi=mm.index;best={m:'p:'+pr.key}}});
+    return best;
+  }
+  lines.forEach(function(raw,li){
+    var line=raw.replace(/\b\d{1,2}:\d{2}(?::\d{2})?\s*(?:am|pm)?/gi,' ').replace(/\b(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\.?\s+\d{1,2}(?:st|nd|rd|th)?(?:,?\s*\d{4})?/gi,' ').replace(/\b\d{1,2}[\/\-]\d{1,2}(?:[\/\-]\d{2,4})?\b/g,' ');
+    var prev=(lines[li-1]||'')+' '+(lines[li-2]||'');
+    var bp=line.match(/\b(\d{2,3})\s*\/\s*(\d{2,3})\b/);
+    if(bp&&/mmhg|blood\s*pressure|\bbp\b|systolic/i.test(line+' '+prev)){
+      var sy=Number(bp[1]),di=Number(bp[2]);
+      if(sy>=70&&sy<=260&&di>=40&&di<=160){add('p:sys',sy,raw,'mmHg');add('p:dia',di,raw,'mmHg');line=line.replace(bp[0],' ')}
+    }
+    var mt;numRe.lastIndex=0;
+    while((mt=numRe.exec(line))){
+      var v=parseFloat(mt[1].replace(',','.')),unit=(mt[2]||'').toLowerCase().replace(/\s+/g,''),before=line.slice(0,mt.index),sameLine=before+' '+line.slice(mt.index+mt[0].length);
+      var ctx=(prev+' '+before).toLowerCase(),metric=null,disp=unit;
+      var kw=ctxMetric(before.toLowerCase())||ctxMetric(sameLine.toLowerCase());
+      if(unit==='mmol/l'){
+        if(kw&&kw.m==='g'){metric='g';v=Math.round(v*18.016*10)/10}
+        else if(kw&&kw.m==='k')metric='k';
+        else{var kp=ctxMetric(ctx);metric=kp&&kp.m==='g'?'g':'k';if(metric==='g')v=Math.round(v*18.016*10)/10}
+      }else if(unit==='mg/dl'){metric='g'}
+      else if(unit==='lb'||unit==='lbs'||unit==='ib'||unit==='ibs'){metric='w'}
+      else if(unit==='kg'){metric='w';v=Math.round(v*LB*10)/10}
+      else if(unit==='bpm'){metric='p:hr'}
+      else if(unit==='mmhg'){var k2=ctxMetric(ctx);metric=k2&&(k2.m==='p:dia')?'p:dia':'p:sys'}
+      else if(unit==='%'||unit==='cm'||unit==='in'||unit===''){
+        var k3=kw||ctxMetric(ctx);
+        if(k3)metric=k3.m;
+        if(!kw&&k3&&unit===''&&!/[a-z]/i.test(before.trim().slice(-1))){/* number far from label with no unit; allow only if label in previous line */}
+      }
+      if(!metric)continue;
+      if(metric==='w'&&unit===''&&v<60)continue;
+      var ok=true;
+      if(metric==='k')ok=v>=0&&v<=10;
+      else if(metric==='g')ok=v>=30&&v<=600;
+      else if(metric==='w')ok=v>=60&&v<=700;
+      else if(metric.slice(0,2)==='p:'){var pr=PRESETS.filter(function(p){return p.key===metric.slice(2)})[0];ok=pr&&v>=pr.lo&&v<=pr.hi}
+      if(!ok)continue;
+      add(metric,v,raw,unit);
+    }
+  });
+  // only the first reading of each metric is selected by default
+  var firstOf={};rows.forEach(function(r){if(firstOf[r.m]){r.on=false}else firstOf[r.m]=1});
+  return rows;
+}
+function metricOptions(sel){
+  var o=[['skip','Skip'],['w','Weight'],['k','Ketones'],['g','Glucose']];
+  S.metrics.forEach(function(m){o.push(['m:'+m.id,m.name])});
+  PRESETS.forEach(function(p){if(!S.metrics.some(function(m){return m.name.toLowerCase()===p.name.toLowerCase()}))o.push(['p:'+p.key,p.name+' (new)'])});
+  return o.map(function(x){return '<option value="'+x[0]+'"'+(x[0]===sel?' selected':'')+'>'+esc(x[1])+'</option>'}).join('');
+}
+function rowMetricKey(m){
+  if(m==='w'||m==='k'||m==='g'||m==='skip')return m;
+  if(m.slice(0,2)==='p:'){var p=PRESETS.filter(function(x){return x.key===m.slice(2)})[0];var ex=S.metrics.filter(function(x){return x.name.toLowerCase()===p.name.toLowerCase()})[0];return ex?'m:'+ex.id:m}
+  return m;
+}
+function importFiles(files){
+  var list=[].slice.call(files).slice(0,6);if(!list.length)return;
+  var el=sheet('<div class="sh-h"><div class="eyebrow">READING PHOTOS</div><button class="x" data-a="close">✕</button></div><div id="ocr-s" class="mut">Loading reader (first time only, about 7 MB)...</div><div class="track" style="margin-top:12px"><div class="fill" id="ocr-b" style="width:3%;background:var(--teal)"></div></div><div class="note" style="margin-top:12px">Photos are read on your phone. Nothing is uploaded.</div>');
+  var cancelled=false,worker=null;
+  var obs=new MutationObserver(function(){if(!document.body.contains(el)){cancelled=true;obs.disconnect();if(worker){worker.terminate();worker=null}}});
+  obs.observe($('#sheet-root'),{childList:true});
+  var results=[];
+  function setP(txt,pct){var s=$('#ocr-s',el),b=$('#ocr-b',el);if(s)s.textContent=txt;if(b)b.style.width=Math.max(3,Math.min(100,pct))+'%'}
+  var finishNoOcr=function(){
+    results=list.map(function(f){return {file:f,url:URL.createObjectURL(f),date:null,rows:[],text:''}});
+    obs.disconnect();showImportReview(results,'The photo reader could not start. Add the numbers by hand below.');
+  };
+  loadScript('tesseract.min.js').then(function(){
+    return Tesseract.createWorker('eng',1,{workerPath:absUrl('worker.min.js'),corePath:absUrl('tesseract-core-simd-lstm.wasm.js'),langPath:absUrl('.').replace(/\/$/,''),logger:function(m){
+      if(cancelled)return;
+      if(m.status==='recognizing text')setP('Reading photo '+(results.length+1)+' of '+list.length+'...',10+((results.length+m.progress)/list.length)*88);
+      else if(/load|init/.test(m.status))setP('Loading reader...',6+(m.progress||0)*4);
+    }});
+  }).then(function(w){
+    worker=w;
+    var chain=Promise.resolve();
+    list.forEach(function(f){
+      chain=chain.then(function(){
+        if(cancelled)return;
+        return fileToCanvas(f).then(function(cv){
+          var p1=prepForOcr(cv,null);
+          return worker.recognize(p1.canvas).then(function(r1){
+            var t=r1.data.text||'',rows=parseOcr(t);
+            if(rows.length)return {t:t,rows:rows};
+            var p2=prepForOcr(cv,!p1.dark);
+            return worker.recognize(p2.canvas).then(function(r2){var t2=r2.data.text||'';return {t:t+'\n'+t2,rows:parseOcr(t2)}});
+          });
+        }).then(function(o){results.push({file:f,url:URL.createObjectURL(f),date:findDate(o.t),rows:o.rows,text:o.t})});
+      });
+    });
+    return chain;
+  }).then(function(){
+    if(cancelled)return;
+    obs.disconnect();if(worker){worker.terminate();worker=null}
+    showImportReview(results);
+  }).catch(function(){if(!cancelled){if(worker){worker.terminate();worker=null}finishNoOcr()}});
+}
+function showImportReview(results,warn){
+  var el=sheet('<div class="sh-h"><div class="eyebrow">REVIEW BEFORE SAVING</div><button class="x" data-a="close">✕</button></div>'+(warn?'<div class="warn" style="margin-bottom:10px">'+esc(warn)+'</div>':'')+'<div class="note" style="margin-bottom:10px">Check every number against your photo. Untick or change anything that was misread. Only ticked rows are saved.</div><div id="rv-body"></div><div class="btnrow"><button class="btn primary" id="rv-ok">Save ticked rows</button></div>');
+  function rowHtml(pi,ri,r){
+    var met=r.m;
+    return '<div class="rvrow" data-p="'+pi+'" data-r="'+ri+'"><input type="checkbox" class="rv-on" '+(r.on?'checked':'')+' aria-label="Include"><select class="inp rv-m">'+metricOptions(met)+'</select><input class="inp rv-v" inputmode="decimal" value="'+esc(r.v==null?'':(met==='w'?(Math.round(wDisp(r.v)*10)/10):r.v))+'"><span class="rv-u mut sm">'+esc(unitFor(met))+'</span></div>';
+  }
+  function unitFor(m){
+    if(m==='w')return S.units;if(m==='k')return 'mmol/L';if(m==='g')return 'mg/dL';
+    if(m==='skip')return '';
+    if(m.slice(0,2)==='m:'){var d=metricDef(m.slice(2));return d?d.unit:''}
+    if(m.slice(0,2)==='p:'){return PRESETS.filter(function(p){return p.key===m.slice(2)})[0].unit}
+    return '';
+  }
+  function draw(){
+    $('#rv-body',el).innerHTML=results.map(function(p,pi){
+      return '<div class="rvphoto"><div style="display:flex;gap:12px;align-items:flex-start"><img src="'+p.url+'" alt="Photo '+(pi+1)+'" class="rvimg"><div style="flex:1;min-width:0"><div class="field" style="margin-bottom:6px"><label>Date for this photo</label><input class="inp rv-d" type="date" data-p="'+pi+'" value="'+(p.date||ui.date)+'" max="'+today()+'"></div>'+(p.date?'<div class="mut sm">Date found in the photo</div>':'<div class="mut sm">No date found, using '+esc(dlabel(ui.date))+'</div>')+'</div></div>'+
+        (p.rows.length?'':'<div class="warn" style="margin:8px 0 4px">No numbers were recognized. Add them below.</div>')+
+        '<div id="rows-'+pi+'">'+p.rows.map(function(r,ri){return rowHtml(pi,ri,r)}).join('')+'</div><button class="btn sm" data-addrow="'+pi+'" style="margin-top:8px">+ Add a row</button>'+
+        '<details style="margin-top:8px"><summary class="mut sm">Text the reader saw</summary><pre class="rvtxt">'+esc(p.text||'(none)')+'</pre></details></div>';
+    }).join('');
+  }
+  draw();
+  el.addEventListener('click',function(ev){
+    var a=ev.target.dataset.addrow;
+    if(a!=null){var pi=Number(a);results[pi].rows.push({m:'w',v:null,label:'',unit:'',on:true});draw()}
+  });
+  el.addEventListener('change',function(ev){
+    var t=ev.target,row=t.closest('.rvrow');
+    if(t.classList.contains('rv-d')){results[Number(t.dataset.p)].date=t.value;return}
+    if(!row)return;
+    var r=results[Number(row.dataset.p)].rows[Number(row.dataset.r)];
+    if(t.classList.contains('rv-m')){r.m=t.value;row.querySelector('.rv-u').textContent=unitFor(t.value);if(t.value==='skip')row.querySelector('.rv-on').checked=false}
+    if(t.classList.contains('rv-on'))r.on=t.checked;
+  });
+  el.addEventListener('input',function(ev){
+    var t=ev.target,row=t.closest('.rvrow');if(!row||!t.classList.contains('rv-v'))return;
+    var r=results[Number(row.dataset.p)].rows[Number(row.dataset.r)];r.v=num(t.value);r.edited=true;r.vDisp=t.value;
+  });
+  $('#rv-ok',el).addEventListener('click',function(){
+    var saved=0,bad=0;
+    results.forEach(function(p){
+      var d=p.date||ui.date,noon=new Date(d+'T12:00:00').getTime(),t=d===today()?Date.now():noon;
+      p.rows.forEach(function(r){
+        if(!r.on||r.m==='skip')return;
+        var val=Number(r.edited?num(r.vDisp):(r.m==='w'?r.v:r.v));
+        if(r.m==='w'&&r.edited)val=wFrom(num(r.vDisp));
+        if(!(val>0)){bad++;return}
+        var day=S.vit[d]=S.vit[d]||{k:[],g:[]};
+        function pushR(arr,v2){arr=arr||[];if(!arr.some(function(x){return x.v===v2}))arr.push({v:v2,t:t});return arr}
+        if(r.m==='w'){if(val<50||val>700){bad++;return}day.w=Math.round(val*100)/100}
+        else if(r.m==='k'){if(val>10){bad++;return}day.k=pushR(day.k,Math.round(val*100)/100)}
+        else if(r.m==='g'){if(val<20||val>800){bad++;return}day.g=pushR(day.g,Math.round(val*10)/10)}
+        else{
+          var key=rowMetricKey(r.m),id;
+          if(key.slice(0,2)==='p:'){var pr=PRESETS.filter(function(x){return x.key===key.slice(2)})[0],mdef=ensureMetric(pr.name,pr.unit);mdef.dec=pr.dec;id=mdef.id}
+          else id=key.slice(2);
+          day.m=day.m||{};day.m[id]=pushR(day.m[id],Math.round(val*100)/100);
+        }
+        saved++;
+      });
+    });
+    save();closeSheet();render();
+    toast(saved?('Saved '+saved+' reading'+(saved>1?'s':'')+(bad?' ('+bad+' skipped)':'')):'Nothing was saved');
+  });
+}
 
 /* ---------- settings ---------- */
 function openSettings(){
@@ -1016,7 +1464,7 @@ var A={
   },
   fastcancel:function(){if(!confirm('Discard this fast without saving it?'))return;S.fast=null;save();render()},
   vadd:function(el){
-    var t=el.dataset.t,inp=$('#hv-'+t);if(!inp)return;
+    var t=el.dataset.t,inp=$('#hv-'+t.replace(':','-'));if(!inp)return;
     var raw=num(inp.value);if(!(raw>0)){toast('Enter a number');return}
     var v=S.vit[ui.date]=S.vit[ui.date]||{k:[],g:[]};
     if(t==='w'){
@@ -1025,17 +1473,27 @@ var A={
     }else if(t==='k'){
       if(raw>10){toast('Ketones are in mmol/L (usually 0 to 6)');return}
       (v.k=v.k||[]).push({v:Math.round(raw*100)/100,t:Date.now()});
-    }else{
+    }else if(t==='g'){
       if(raw<20||raw>800){toast('Glucose is in mg/dL, check the number');return}
       (v.g=v.g||[]).push({v:Math.round(raw*10)/10,t:Date.now()});
+    }else{
+      var id=t.slice(2);v.m=v.m||{};(v.m[id]=v.m[id]||[]).push({v:Math.round(raw*100)/100,t:Date.now()});
     }
     save();render();toast('Saved');
   },
   vdel:function(el){
-    var v=S.vit[ui.date];if(!v)return;
-    if(el.dataset.t==='w')delete v.w;else v[el.dataset.t].splice(Number(el.dataset.i),1);
+    var v=S.vit[ui.date],t=el.dataset.t;if(!v)return;
+    if(t==='w')delete v.w;
+    else if(t==='k'||t==='g')v[t].splice(Number(el.dataset.i),1);
+    else if(v.m&&v.m[t.slice(2)])v.m[t.slice(2)].splice(Number(el.dataset.i),1);
     save();render();
   },
+  goaledit:openGoalSheet,
+  metricadd:openMetricSheet,
+  twin:function(el){S.trendDays=Number(el.dataset.n);save();$('#goal-card').innerHTML=goalCardHtml();$('#w-chart').innerHTML=weightChartHtml()},
+  wrange:function(el){ui.wr=el.dataset.r;$('#w-chart').innerHTML=weightChartHtml()},
+  mrange:function(el){ui.mr=el.dataset.r;$('#m-charts').innerHTML=metricsChartsHtml()},
+  photo:function(){var f=$('#photo-in');if(f)f.click()},
   wkprev:function(){ui.wk=addDays(ui.wk,-7);$('#wk-card').innerHTML=weeklyHtml()},
   wknext:function(){if(ui.wk>=monday(today()))return;ui.wk=addDays(ui.wk,7);$('#wk-card').innerHTML=weeklyHtml()},
   wkcopy:function(){copyText(weekText(weekData(ui.wk))).then(function(){toast('Summary copied')}).catch(function(){toast('Could not copy')})},
@@ -1114,7 +1572,11 @@ document.addEventListener('input',function(e){
 });
 document.addEventListener('keydown',function(e){
   if(e.key!=='Enter')return;var t=e.target;
-  if(t&&/^hv-[wkg]$/.test(t.id)){var b=document.querySelector('[data-a=vadd][data-t='+t.id.slice(3)+']');if(b)b.click()}
+  if(t&&/^hv-(w|k|g|m-.+)$/.test(t.id)){var key=t.id.slice(3).replace(/^m-/,'m:');var b=document.querySelector('[data-a=vadd][data-t="'+key+'"]');if(b)b.click()}
+});
+document.addEventListener('change',function(e){
+  var t=e.target;
+  if(t&&t.id==='photo-in'&&t.files&&t.files.length){var fl=t.files;importFiles(fl);setTimeout(function(){t.value=''},0)}
 });
 document.addEventListener('visibilitychange',function(){
   if(!document.hidden)tickFast();
