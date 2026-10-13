@@ -823,12 +823,18 @@ function rdgs(d,type){var v=vit(d);return type==='k'?v.k:type==='g'?v.g:(v.m[typ
 function dailyAvg(type,d){return avgOf(rdgs(d,type).map(function(x){return x.v}))}
 function metricDef(id){return S.metrics.filter(function(m){return m.id===id})[0]}
 var PRESETS=[
-  {key:'bodyfat',name:'Body fat',unit:'%',dec:1,re:/body\s*fat|bodyfat|fat\s*(%|percent|rate)|\bbf\b/i,lo:2,hi:70},
-  {key:'bmi',name:'BMI',unit:'',dec:1,re:/\bbmi\b|body mass index/i,lo:10,hi:80},
-  {key:'muscle',name:'Muscle mass',unit:'%',dec:1,re:/muscle/i,lo:10,hi:90},
-  {key:'water',name:'Body water',unit:'%',dec:1,re:/body\s*water|water\s*(%|percent)|hydration/i,lo:20,hi:90},
+  {key:'ffm',name:'Fat-free body weight',unit:'lb',dec:1,re:/fat[\s-]*free|\bffm\b|lean\s*body/i,lo:40,hi:500},
+  {key:'subfat',name:'Subcutaneous fat',unit:'%',dec:1,re:/subcutaneous|subq/i,lo:2,hi:70},
   {key:'visceral',name:'Visceral fat',unit:'',dec:0,re:/visceral/i,lo:1,hi:60},
-  {key:'bone',name:'Bone mass',unit:'',dec:1,re:/bone/i,lo:0.5,hi:20},
+  {key:'bodyfat',name:'Body fat',unit:'%',dec:1,re:/body\s*fat|bodyfat|fat\s*(%|percent|rate)|\bbf\b/i,lo:2,hi:70},
+  {key:'muscle',name:'Skeletal muscle',unit:'%',dec:1,re:/skeletal|muscle\s*(%|percent|rate)/i,lo:10,hi:90},
+  {key:'musclemass',name:'Muscle mass',unit:'lb',dec:1,re:/muscle/i,lo:30,hi:400},
+  {key:'bone',name:'Bone mass',unit:'lb',dec:1,re:/bone/i,lo:0.5,hi:30},
+  {key:'water',name:'Body water',unit:'%',dec:1,re:/body\s*water|water\s*(%|percent)|hydration/i,lo:20,hi:90},
+  {key:'protein',name:'Body protein',unit:'%',dec:1,re:/protein/i,lo:5,hi:40},
+  {key:'metage',name:'Metabolic age',unit:'yrs',dec:0,re:/metabolic\s*age|body\s*age/i,lo:10,hi:100},
+  {key:'bmr',name:'BMR',unit:'kcal',dec:0,re:/\bbmr\b|basal/i,lo:500,hi:6000},
+  {key:'bmi',name:'BMI',unit:'',dec:1,re:/\bbmi\b|body mass index/i,lo:10,hi:80},
   {key:'waist',name:'Waist',unit:'in',dec:1,re:/waist/i,lo:15,hi:80},
   {key:'hr',name:'Resting heart rate',unit:'bpm',dec:0,re:/heart\s*rate|pulse|resting\s*hr|\bbpm\b/i,lo:30,hi:220},
   {key:'sys',name:'Systolic BP',unit:'mmHg',dec:0,re:/systolic|\bsys\b/i,lo:70,hi:260},
@@ -1188,6 +1194,126 @@ var KEYS=[
   {m:'g',re:/glucose|blood\s*sugar|\bbg\b|\bglu\b|\bcgm\b/i},
   {m:'w',re:/weight|\bwt\b|\bscale\b|body\s*weight/i}
 ];
+/* ---- position-aware reader: pairs each number with its label (left, right, above or below) ---- */
+function classifyLabel(txt){
+  if(!txt)return null;
+  for(var i=0;i<PRESETS.length;i++)if(PRESETS[i].re.test(txt))return 'p:'+PRESETS[i].key;
+  for(var j=0;j<KEYS.length;j++)if(KEYS[j].re.test(txt))return KEYS[j].m;
+  return null;
+}
+function parseWords(words,W){
+  var NUM=/^[(\[]?(\d{1,4}(?:[.,]\d{1,2})?)[.,;:]?(%?)[)\]]?[.,]?$/,BPW=/^(\d{2,3})\/(\d{2,3})$/,
+      UNIT=/^(mg\/?d[l1i]|mmol\/?[l1i]|[li]bs?|kg|%|bpm|mmhg|cm|kcal|in)$/i;
+  var ws=words.filter(function(w){return w.t&&w.t.trim()&&w.c>=20}).map(function(w){
+    return {t:w.t.trim(),c:w.c,x0:w.x0,y0:w.y0,x1:w.x1,y1:w.y1,cx:(w.x0+w.x1)/2,cy:(w.y0+w.y1)/2,h:w.y1-w.y0};
+  });
+  ws.sort(function(a,b){return a.cy-b.cy});
+  // group into rows by vertical overlap
+  var rows=[];
+  ws.forEach(function(w){
+    var r=rows.filter(function(r){var ov=Math.min(r.y1,w.y1)-Math.max(r.y0,w.y0);return ov>0.5*Math.min(r.y1-r.y0,w.h)})[0];
+    if(r){r.ws.push(w);r.y0=Math.min(r.y0,w.y0);r.y1=Math.max(r.y1,w.y1)}else rows.push({ws:[w],y0:w.y0,y1:w.y1});
+  });
+  rows.forEach(function(r){r.ws.sort(function(a,b){return a.x0-b.x0});r.h=r.ws.reduce(function(m,w){return Math.max(m,w.h)},0);r.ws.forEach(function(w){w.row=r})});
+  rows.sort(function(a,b){return a.y0-b.y0});
+  var colHalf=Math.max(90,0.15*W);
+  function isNum(w){return NUM.test(w.t)||BPW.test(w.t)}
+  function isStatus(w){return /^(excess|elevated|high|low|standard|excellent|normal|good|fair|poor|optimal|healthy)$/i.test(w.t)}
+  // words of a row around a number, extended to neighbours with small gaps
+  function phrase(row,cx,skip){
+    var seed=row.ws.filter(function(w){return !isNum(w)&&!isStatus(w)&&!UNIT.test(w.t)&&Math.abs(w.cx-cx)<colHalf});
+    if(!seed.length)return [];
+    var set=seed.slice(),grew=true;
+    while(grew){grew=false;row.ws.forEach(function(w){
+      if(set.indexOf(w)>=0||isNum(w)||isStatus(w)||UNIT.test(w.t))return;
+      set.forEach(function(s){var gap=w.x0>=s.x1?w.x0-s.x1:s.x0>=w.x1?s.x0-w.x1:0;if(set.indexOf(w)<0&&gap<1.6*Math.max(w.h,s.h)){set.push(w);grew=true}});
+    })}
+    set.sort(function(a,b){return a.x0-b.x0});return set;
+  }
+  var out=[],seen={};
+  rows.forEach(function(row,ri){
+    row.ws.forEach(function(w,wi){
+      var bp=w.t.match(BPW),nm=w.t.match(NUM);
+      if(!bp&&!nm)return;
+      // unit: next unit word on the row with no number between
+      var unit='',ux1=w.x1;
+      if(nm&&nm[2]==='%')unit='%';
+      for(var k=wi+1;k<row.ws.length;k++){
+        var n=row.ws[k];if(isNum(n))break;
+        if(UNIT.test(n.t)&&n.x0-w.x1<3.2*Math.max(w.h,n.h)){unit=n.t.toLowerCase().replace(/^i/,'l').replace(/d[1i]$/,'dl').replace(/[1i]$/,'l');ux1=n.x1;break}
+        if(n.x0-w.x1>3.2*w.h)break;
+      }
+      unit=unit.replace(/^l?bs?$/,'lb').replace(/^lbs$/,'lb');
+      if(/^mg/.test(unit))unit='mg/dl';else if(/^mmol/.test(unit))unit='mmol/l';
+      // dates and clock fragments: skip numbers next to a month name or "today"
+      var near=row.ws.map(function(x){return x.t}).join(' ');
+      if(/\b(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\.?\b|today|yesterday/i.test(near)&&!unit)return;
+      // label candidates
+      var right=[],left=[];
+      for(var a=wi+1;a<row.ws.length;a++){var rw=row.ws[a];if(isNum(rw)||rw.x0-ux1>6*w.h)break;if(!UNIT.test(rw.t)&&!isStatus(rw)&&rw.x0>=ux1-2)right.push(rw.t)}
+      for(var b=wi-1;b>=0&&left.length<4;b--){var lw=row.ws[b];if(isNum(lw)||w.x0-lw.x1>4*w.h)break;if(!UNIT.test(lw.t))left.unshift(lw.t)}
+      var above='',below='',aboveBox=null;
+      // above: nearest row(s) with words in this column
+      for(var u=ri-1;u>=0;u--){
+        var gapA=w.y0-rows[u].y1;if(gapA>1.6*w.h)break;
+        var ph=phrase(rows[u],w.cx);
+        if(ph.length){
+          var txt=ph.map(function(x){return x.t}).join(' ');
+          // a second label line directly above (two-line labels such as Fat-Free / Body Weight)
+          for(var u2=u-1;u2>=0;u2--){
+            var g2=rows[u].y0-rows[u2].y1;if(g2>0.9*rows[u].h)break;
+            var ph2=phrase(rows[u2],w.cx);
+            if(ph2.length){txt=ph2.map(function(x){return x.t}).join(' ')+' '+txt;break}
+          }
+          above=txt;break;
+        }
+      }
+      for(var d=ri+1;d<rows.length;d++){
+        var gapB=rows[d].y0-w.y1;if(gapB>1.5*w.h)break;
+        var ph3=phrase(rows[d],w.cx);
+        if(ph3.length){below=ph3.map(function(x){return x.t}).join(' ');break}
+      }
+      var ctx=[right.join(' '),left.join(' '),above,below].join(' ');
+      if(bp){
+        var sy=+bp[1],di=+bp[2];
+        if(sy>di&&sy>=70&&sy<=260&&di>=40&&di<=160&&(unit==='mmhg'||/mmhg|pressure|\bbp\b|systolic|diastolic/i.test(ctx+' '+near))){
+          [['p:sys',sy],['p:dia',di]].forEach(function(p){var key=p[0]+'|'+p[1];if(!seen[key]){seen[key]=1;out.push({m:p[0],v:p[1],label:'BP',unit:'mmHg',on:true,y:w.cy,x:w.cx,c:w.c})}});
+        }
+        return;
+      }
+      var v=parseFloat(nm[1].replace(',','.')),metric=null;
+      var lab=classifyLabel(right.join(' '))||classifyLabel(left.join(' '))||classifyLabel(above)||classifyLabel(below);
+      var labTxt=[right.join(' '),left.join(' '),above,below].filter(Boolean)[0]||'';
+      if(unit==='mg/dl')metric='g';
+      else if(unit==='mmol/l'){
+        if(lab==='g'){metric='g';v=Math.round(v*18.016*10)/10}
+        else metric=(lab==='k'||v<=6||!lab)?'k':'g';
+        if(metric==='g'&&unit==='mmol/l'&&lab!=='g')v=Math.round(v*18.016*10)/10;
+      }
+      else if(unit==='bpm')metric='p:hr';
+      else if(unit==='mmhg')metric=lab==='p:dia'?'p:dia':'p:sys';
+      else if(unit==='lb'||unit==='kg'){
+        metric=lab&&(lab==='w'||lab.slice(0,2)==='p:')?lab:'w';
+        if(unit==='kg')v=Math.round(v*LB*10)/10;
+      }
+      else if(lab){metric=lab}
+      if(!metric)return;
+      if(metric==='k'||metric==='g'){/* label must not have hijacked an unrelated number */}
+      var ok=true;
+      if(metric==='k')ok=v>=0&&v<=10;
+      else if(metric==='g')ok=v>=30&&v<=600;
+      else if(metric==='w')ok=v>=60&&v<=700;
+      else if(metric.slice(0,2)==='p:'){var pr=PRESETS.filter(function(p){return p.key===metric.slice(2)})[0];ok=pr&&v>=pr.lo&&v<=pr.hi}
+      if(!ok)return;
+      if(metric==='w'&&!unit&&v<60)return;
+      var key2=metric+'|'+v;if(seen[key2])return;seen[key2]=1;
+      out.push({m:metric,v:v,label:labTxt,unit:unit,on:true,y:w.cy,x:w.cx,c:w.c,box:[w.x0,w.y0,Math.max(ux1,w.x1),w.y1]});
+    });
+  });
+  out.sort(function(a,b){return Math.abs(a.y-b.y)<20?a.x-b.x:a.y-b.y});
+  var firstOf={};out.forEach(function(r){if(firstOf[r.m])r.on=false;else firstOf[r.m]=1});
+  return out;
+}
 function parseOcr(text){
   var lines=text.split(/\n+/).map(function(s){return s.replace(/[|_]/g,' ').trim()}).filter(Boolean),rows=[],seen={};
   var numRe=/(\d{1,4}(?:[.,]\d{1,2})?)\s*(mmol\s*\/?\s*l|mg\s*\/?\s*d\s*l|[li]bs?|kg|%|bpm|mmhg|cm|in)?/gi;
@@ -1254,6 +1380,41 @@ function rowMetricKey(m){
   if(m.slice(0,2)==='p:'){var p=PRESETS.filter(function(x){return x.key===m.slice(2)})[0];var ex=S.metrics.filter(function(x){return x.name.toLowerCase()===p.name.toLowerCase()})[0];return ex?'m:'+ex.id:m}
   return m;
 }
+/* re-read big whole-number weights (the decimal is often lost on large type) from a close-up of just that number */
+function fixDecimals(worker,canvas,rows){
+  var todo=rows.filter(function(r){
+    if(!r.box||!Number.isInteger(r.v))return false;
+    if(r.m==='w')return true;
+    var pr=r.m.slice(0,2)==='p:'?PRESETS.filter(function(p){return p.key===r.m.slice(2)})[0]:null;
+    return pr&&pr.dec>=1;
+  });
+  if(!todo.length)return Promise.resolve();
+  var chain=worker.setParameters({tessedit_char_whitelist:'0123456789.',tessedit_pageseg_mode:'7'});
+  todo.forEach(function(r){
+    chain=chain.then(function(){
+      var b=r.box,hh=b[3]-b[1],pad=Math.round(hh*0.35),th=Math.max(1,130/hh),sx=Math.max(0,b[0]-pad),sy=Math.max(0,b[1]-pad),sw=Math.min(canvas.width-sx,b[2]-b[0]+2*pad),sh=Math.min(canvas.height-sy,hh+2*pad);
+      var c=document.createElement('canvas');c.width=Math.round(sw*th)+40;c.height=Math.round(sh*th)+40;
+      var x=c.getContext('2d');x.fillStyle='#fff';x.fillRect(0,0,c.width,c.height);x.drawImage(canvas,sx,sy,sw,sh,20,20,Math.round(sw*th),Math.round(sh*th));
+      return worker.recognize(c).then(function(res){
+        var m=(res.data.text||'').trim().match(/(\d{1,4})\.(\d{1,2})/);
+        if(m&&Number(m[1])===r.v)r.v=parseFloat(m[1]+'.'+m[2]);
+      });
+    });
+  });
+  return chain.then(function(){return worker.setParameters({tessedit_char_whitelist:'',tessedit_pageseg_mode:'3'})}).catch(function(){});
+}
+function dedupePhotos(results){
+  // one reading per measurement per day: later photos of the same day do not pre-tick a measurement an earlier photo already has
+  var have={};
+  results.forEach(function(p){
+    var d=p.date||ui.date,mine={};
+    p.rows.forEach(function(r){
+      var k=d+'|'+r.m;
+      if(r.on){if(have[k]&&!mine[k])r.on=false;else mine[k]=1}
+    });
+    for(var k2 in mine)have[k2]=1;
+  });
+}
 function importFiles(files){
   var list=[].slice.call(files).slice(0,6);if(!list.length)return;
   var el=sheet('<div class="sh-h"><div class="eyebrow">READING PHOTOS</div><button class="x" data-a="close">✕</button></div><div id="ocr-s" class="mut">Loading reader (first time only, about 7 MB)...</div><div class="track" style="margin-top:12px"><div class="fill" id="ocr-b" style="width:3%;background:var(--teal)"></div></div><div class="note" style="margin-top:12px">Photos are read on your phone. Nothing is uploaded.</div>');
@@ -1279,12 +1440,17 @@ function importFiles(files){
       chain=chain.then(function(){
         if(cancelled)return;
         return fileToCanvas(f).then(function(cv){
-          var p1=prepForOcr(cv,null);
+          var p1=prepForOcr(cv,null),W=p1.canvas.width;
+          function rowsFrom(r){
+            var ws=(r.data.words||[]).map(function(w){return {t:w.text,c:w.confidence,x0:w.bbox.x0,y0:w.bbox.y0,x1:w.bbox.x1,y1:w.bbox.y1}});
+            var rows=ws.length?parseWords(ws,W):[];
+            return rows.length?rows:parseOcr(r.data.text||'');
+          }
           return worker.recognize(p1.canvas).then(function(r1){
-            var t=r1.data.text||'',rows=parseOcr(t);
-            if(rows.length)return {t:t,rows:rows};
+            var t=r1.data.text||'',rows=rowsFrom(r1);
+            if(rows.length)return fixDecimals(worker,p1.canvas,rows).then(function(){return {t:t,rows:rows}});
             var p2=prepForOcr(cv,!p1.dark);
-            return worker.recognize(p2.canvas).then(function(r2){var t2=r2.data.text||'';return {t:t+'\n'+t2,rows:parseOcr(t2)}});
+            return worker.recognize(p2.canvas).then(function(r2){var t2=r2.data.text||'';return {t:t+'\n'+t2,rows:rowsFrom(r2)}});
           });
         }).then(function(o){results.push({file:f,url:URL.createObjectURL(f),date:findDate(o.t),rows:o.rows,text:o.t})});
       });
@@ -1293,7 +1459,7 @@ function importFiles(files){
   }).then(function(){
     if(cancelled)return;
     obs.disconnect();if(worker){worker.terminate();worker=null}
-    showImportReview(results);
+    dedupePhotos(results);showImportReview(results);
   }).catch(function(){if(!cancelled){if(worker){worker.terminate();worker=null}finishNoOcr()}});
 }
 function showImportReview(results,warn){
