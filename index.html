@@ -1170,6 +1170,7 @@ function prepForOcr(canvas,invert){
   for(i=0;i<n;i++){var v=(lum[i]-lo)/rg*255;v=v<0?0:v>255?255:v;if(inv)v=255-v;d[i*4]=d[i*4+1]=d[i*4+2]=v;d[i*4+3]=255}
   x.putImageData(im,0,0);return {canvas:c,dark:dark};
 }
+var BIGNUM=/^\d{1,4}(?:[.,]\d{1,2})?%?$/;
 var MONTHS='jan feb mar apr may jun jul aug sep oct nov dec'.split(' ');
 function findDate(text){
   var t=today(),lines=text.split(/\n/),best=null;
@@ -1415,6 +1416,94 @@ function dedupePhotos(results){
     for(var k2 in mine)have[k2]=1;
   });
 }
+/* ---- big numbers: the large weight at the top of a scale screen, large values the first pass garbled, and the time shown on the photo ---- */
+function closeRead(worker,canvas,b,target){
+  var hh=b.y1-b.y0,pad=Math.round(hh*0.35),th=Math.max(1,target/hh),sx=Math.max(0,b.x0-pad),sy=Math.max(0,b.y0-pad),sw=Math.min(canvas.width-sx,b.x1-b.x0+2*pad),sh=Math.min(canvas.height-sy,hh+2*pad);
+  var c=document.createElement('canvas');c.width=Math.round(sw*th)+40;c.height=Math.round(sh*th)+40;
+  var x=c.getContext('2d');x.fillStyle='#fff';x.fillRect(0,0,c.width,c.height);x.drawImage(canvas,sx,sy,sw,sh,20,20,Math.round(sw*th),Math.round(sh*th));
+  return worker.recognize(c).then(function(res){var m=(res.data.text||'').trim().replace(/[^0-9]+$/,'').match(/^\d{1,4}(?:\.\d{1,2})?$/);return m?m[0]:null});
+}
+function pickWeight(r1,r2,grp){
+  var re=/^\d{2,3}\.\d{1,2}$/;
+  if(r1&&re.test(r1))return parseFloat(r1);
+  if(r2&&re.test(r2))return parseFloat(r2);
+  if(grp.length===2&&/^\d{2,3}$/.test(grp[0].t)&&/^\d$/.test(grp[1].t))return parseFloat(grp[0].t+'.'+grp[1].t);
+  var r=r1||r2;return r?parseFloat(r):null;
+}
+function findPhotoTime(ws,hero){
+  var found=[];
+  ws.forEach(function(w,i){
+    var m=w.t.match(/^(\d{1,2}):(\d{2})([AaPp])?\.?[Mm]?\.?$/);if(!m)return;
+    var hh=Number(m[1]),mi=Number(m[2]),ap=m[3];
+    if(!ap){var nx=ws[i+1];if(nx&&/^[ap]\.?m\.?$/i.test(nx.t)&&Math.abs((nx.y0+nx.y1)/2-(w.y0+w.y1)/2)<w.h)ap=nx.t.charAt(0)}
+    if(ap){ap=ap.toLowerCase();if(hh<1||hh>12)return;if(ap==='p'&&hh<12)hh+=12;if(ap==='a'&&hh===12)hh=0}
+    if(hh>23||mi>59)return;
+    found.push({min:hh*60+mi,cx:(w.x0+w.x1)/2,cy:(w.y0+w.y1)/2});
+  });
+  if(!found.length)return null;
+  if(hero){
+    var hx=(hero.box.x0+hero.box.x1)/2,hy=(hero.box.y0+hero.box.y1)/2;
+    found.sort(function(a,b){return Math.hypot(a.cx-hx,a.cy-hy)-Math.hypot(b.cx-hx,b.cy-hy)});
+    return found[0].min;
+  }
+  var uniq={};found.forEach(function(f){uniq[f.min]=1});
+  return Object.keys(uniq).length===1?found[0].min:null;
+}
+function readBigNumbers(worker,canvas,words){
+  var ws=(words||[]).filter(function(w){return w.text&&w.text.trim()}).map(function(w){return {t:w.text.trim(),c:w.confidence,x0:w.bbox.x0,y0:w.bbox.y0,x1:w.bbox.x1,y1:w.bbox.y1,h:w.bbox.y1-w.bbox.y0}});
+  var out={words:ws,hero:null,time:null};
+  var hs=ws.map(function(w){return w.h}).sort(function(a,b){return a-b}),med=hs.length?hs[Math.floor(hs.length/2)]:0;
+  if(!med)return Promise.resolve(out);
+  var big=ws.filter(function(w){return w.h>=1.4*med&&/\d/.test(w.t)}),hero=null;
+  /* the weight: the tallest number, clearly larger than the other big numbers, followed by a weight unit */
+  if(big.length){
+    var tall=big.slice().sort(function(a,b){return b.h-a.h})[0],tcy=(tall.y0+tall.y1)/2;
+    var others=big.filter(function(w){return Math.abs((w.y0+w.y1)/2-tcy)>0.6*tall.h});
+    var oh=others.reduce(function(m,w){return Math.max(m,w.h)},0);
+    if(!others.length||tall.h>=1.3*oh){
+      var grp=[tall],grew=true;
+      while(grew){grew=false;big.forEach(function(w){
+        if(grp.indexOf(w)>=0||Math.abs((w.y0+w.y1)/2-tcy)>0.4*tall.h)return;
+        grp.slice().forEach(function(g){var gap=w.x0>=g.x1?w.x0-g.x1:g.x0>=w.x1?g.x0-w.x1:0;if(grp.indexOf(w)<0&&gap<0.8*tall.h){grp.push(w);grew=true}});
+      })}
+      grp.sort(function(a,b){return a.x0-b.x0});
+      var box={x0:grp[0].x0,y0:Math.min.apply(null,grp.map(function(g){return g.y0})),x1:grp[grp.length-1].x1,y1:Math.max.apply(null,grp.map(function(g){return g.y1}))},unit=null;
+      ws.forEach(function(w){
+        var cy=(w.y0+w.y1)/2;
+        if(unit||cy<box.y0-0.3*tall.h||cy>box.y1+0.3*tall.h||w.x1<=(box.x0+box.x1)/2||w.x0-box.x1>3*tall.h)return;
+        if(/^(?:[lji1I|]bs?|kg)$/i.test(w.t))unit=/kg/i.test(w.t)?'kg':'lb';
+      });
+      if(unit)hero={grp:grp,box:box,unit:unit};
+    }
+  }
+  out.words=ws.filter(function(w){return !hero||hero.grp.indexOf(w)<0});
+  out.time=findPhotoTime(ws,hero);
+  var chain=worker.setParameters({tessedit_char_whitelist:'0123456789.',tessedit_pageseg_mode:'7'});
+  if(hero){
+    var r1=null,r2=null;
+    chain=chain.then(function(){return closeRead(worker,canvas,hero.box,90)}).then(function(a){r1=a;return closeRead(worker,canvas,hero.box,200)}).then(function(b){
+      r2=b;
+      var v=pickWeight(r1,r2,hero.grp);
+      if(v!=null&&hero.unit==='kg')v=Math.round(v*LB*10)/10;
+      if(v!=null&&v>=50&&v<=700)out.hero={m:'w',v:v,label:'Weight',unit:hero.unit,on:true};
+    });
+  }
+  /* any other large number the first pass could not read cleanly (for example 41.3 read as a symbol and a 3) */
+  big.filter(function(w){return (!hero||hero.grp.indexOf(w)<0)&&!BIGNUM.test(w.t)}).forEach(function(w){
+    chain=chain.then(function(){return closeRead(worker,canvas,w,90)}).then(function(r){if(r){w.t=r+(w.t.indexOf('%')>=0?'%':'');w.c=80}});
+  });
+  return chain.then(function(){return worker.setParameters({tessedit_char_whitelist:'',tessedit_pageseg_mode:'3'})}).then(function(){return out},function(){return out});
+}
+/* the scale shows one decimal at most; a second decimal is a misread (for example the l of "lb") */
+function roundRows(rows){
+  rows.forEach(function(r){
+    if(r.v==null)return;
+    var dec=null;
+    if(r.m==='w')dec=1;
+    else if(r.m.slice(0,2)==='p:'){var pr=PRESETS.filter(function(x){return x.key===r.m.slice(2)})[0];if(pr)dec=pr.dec}
+    if(dec!=null){var f=Math.pow(10,dec);r.v=Math.round(r.v*f)/f}
+  });
+}
 function importFiles(files){
   var list=[].slice.call(files).slice(0,6);if(!list.length)return;
   var el=sheet('<div class="sh-h"><div class="eyebrow">READING PHOTOS</div><button class="x" data-a="close">✕</button></div><div id="ocr-s" class="mut">Loading reader (first time only, about 7 MB)...</div><div class="track" style="margin-top:12px"><div class="fill" id="ocr-b" style="width:3%;background:var(--teal)"></div></div><div class="note" style="margin-top:12px">Photos are read on your phone. Nothing is uploaded.</div>');
@@ -1441,18 +1530,22 @@ function importFiles(files){
         if(cancelled)return;
         return fileToCanvas(f).then(function(cv){
           var p1=prepForOcr(cv,null),W=p1.canvas.width;
-          function rowsFrom(r){
-            var ws=(r.data.words||[]).map(function(w){return {t:w.text,c:w.confidence,x0:w.bbox.x0,y0:w.bbox.y0,x1:w.bbox.x1,y1:w.bbox.y1}});
+          function rowsFrom(r,wl){
+            var ws=wl||(r.data.words||[]).map(function(w){return {t:w.text,c:w.confidence,x0:w.bbox.x0,y0:w.bbox.y0,x1:w.bbox.x1,y1:w.bbox.y1}});
             var rows=ws.length?parseWords(ws,W):[];
             return rows.length?rows:parseOcr(r.data.text||'');
           }
           return worker.recognize(p1.canvas).then(function(r1){
-            var t=r1.data.text||'',rows=rowsFrom(r1);
-            if(rows.length)return fixDecimals(worker,p1.canvas,rows).then(function(){return {t:t,rows:rows}});
+            var t=r1.data.text||'';
+            return readBigNumbers(worker,p1.canvas,r1.data.words).then(function(big){
+            var rows=rowsFrom(r1,big.words);
+            if(big.hero){rows.forEach(function(r){if(r.m==='w')r.on=false});rows.unshift(big.hero)}
+            if(rows.length)return fixDecimals(worker,p1.canvas,rows).then(function(){roundRows(rows);return {t:t,rows:rows,time:big.time}});
             var p2=prepForOcr(cv,!p1.dark);
             return worker.recognize(p2.canvas).then(function(r2){var t2=r2.data.text||'';return {t:t+'\n'+t2,rows:rowsFrom(r2)}});
+            });
           });
-        }).then(function(o){results.push({file:f,url:URL.createObjectURL(f),date:findDate(o.t),rows:o.rows,text:o.t})});
+        }).then(function(o){results.push({file:f,url:URL.createObjectURL(f),date:findDate(o.t),time:o.time==null?null:o.time,rows:o.rows,text:o.t})});
       });
     });
     return chain;
@@ -1477,7 +1570,7 @@ function showImportReview(results,warn){
   }
   function draw(){
     $('#rv-body',el).innerHTML=results.map(function(p,pi){
-      return '<div class="rvphoto"><div style="display:flex;gap:12px;align-items:flex-start"><img src="'+p.url+'" alt="Photo '+(pi+1)+'" class="rvimg"><div style="flex:1;min-width:0"><div class="field" style="margin-bottom:6px"><label>Date for this photo</label><input class="inp rv-d" type="date" data-p="'+pi+'" value="'+(p.date||ui.date)+'" max="'+today()+'"></div>'+(p.date?'<div class="mut sm">Date found in the photo</div>':'<div class="mut sm">No date found, using '+esc(dlabel(ui.date))+'</div>')+'</div></div>'+
+      return '<div class="rvphoto"><div style="display:flex;gap:12px;align-items:flex-start"><img src="'+p.url+'" alt="Photo '+(pi+1)+'" class="rvimg"><div style="flex:1;min-width:0"><div class="field" style="margin-bottom:6px"><label>Date for this photo</label><input class="inp rv-d" type="date" data-p="'+pi+'" value="'+(p.date||ui.date)+'" max="'+today()+'"></div>'+(p.date?'<div class="mut sm">Date found in the photo</div>':'<div class="mut sm">No date found, using '+esc(dlabel(ui.date))+'</div>')+'<div class="field" style="margin:8px 0 6px"><label>Time of reading</label><input class="inp rv-tm" type="time" data-p="'+pi+'" value="'+(p.time==null?'':pad(Math.floor(p.time/60))+':'+pad(p.time%60))+'"></div>'+(p.time!=null?'<div class="mut sm">Time found in the photo</div>':'<div class="mut sm">No time found, using the time you save</div>')+'</div></div>'+
         (p.rows.length?'':'<div class="warn" style="margin:8px 0 4px">No numbers were recognized. Add them below.</div>')+
         '<div id="rows-'+pi+'">'+p.rows.map(function(r,ri){return rowHtml(pi,ri,r)}).join('')+'</div><button class="btn sm" data-addrow="'+pi+'" style="margin-top:8px">+ Add a row</button>'+
         '<details style="margin-top:8px"><summary class="mut sm">Text the reader saw</summary><pre class="rvtxt">'+esc(p.text||'(none)')+'</pre></details></div>';
@@ -1491,6 +1584,7 @@ function showImportReview(results,warn){
   el.addEventListener('change',function(ev){
     var t=ev.target,row=t.closest('.rvrow');
     if(t.classList.contains('rv-d')){results[Number(t.dataset.p)].date=t.value;return}
+    if(t.classList.contains('rv-tm')){var tp=t.value.match(/^(\d{1,2}):(\d{2})$/);results[Number(t.dataset.p)].time=tp?Number(tp[1])*60+Number(tp[2]):null;return}
     if(!row)return;
     var r=results[Number(row.dataset.p)].rows[Number(row.dataset.r)];
     if(t.classList.contains('rv-m')){r.m=t.value;row.querySelector('.rv-u').textContent=unitFor(t.value);if(t.value==='skip')row.querySelector('.rv-on').checked=false}
@@ -1504,6 +1598,7 @@ function showImportReview(results,warn){
     var saved=0,bad=0;
     results.forEach(function(p){
       var d=p.date||ui.date,noon=new Date(d+'T12:00:00').getTime(),t=d===today()?Date.now():noon;
+      if(p.time!=null){var pt=new Date(d+'T'+pad(Math.floor(p.time/60))+':'+pad(p.time%60)+':00').getTime();if(!isNaN(pt))t=pt}
       p.rows.forEach(function(r){
         if(!r.on||r.m==='skip')return;
         var val=Number(r.edited?num(r.vDisp):(r.m==='w'?r.v:r.v));
