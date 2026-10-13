@@ -1466,7 +1466,7 @@ function showImportReview(results,warn){
   var el=sheet('<div class="sh-h"><div class="eyebrow">REVIEW BEFORE SAVING</div><button class="x" data-a="close">✕</button></div>'+(warn?'<div class="warn" style="margin-bottom:10px">'+esc(warn)+'</div>':'')+'<div class="note" style="margin-bottom:10px">Check every number against your photo. Untick or change anything that was misread. Only ticked rows are saved.</div><div id="rv-body"></div><div class="btnrow"><button class="btn primary" id="rv-ok">Save ticked rows</button></div>');
   function rowHtml(pi,ri,r){
     var met=r.m;
-    return '<div class="rvrow" data-p="'+pi+'" data-r="'+ri+'"><input type="checkbox" class="rv-on" '+(r.on?'checked':'')+' aria-label="Include"><select class="inp rv-m">'+metricOptions(met)+'</select><input class="inp rv-v" inputmode="decimal" value="'+esc(r.v==null?'':(met==='w'?(Math.round(wDisp(r.v)*10)/10):r.v))+'"><span class="rv-u mut sm">'+esc(unitFor(met))+'</span></div>';
+    return '<div class="rvrow" data-p="'+pi+'" data-r="'+ri+'"><input type="checkbox" class="rv-on" '+(r.on?'checked':'')+' aria-label="Include"><select class="inp rv-m">'+metricOptions(rowMetricKey(met))+'</select><input class="inp rv-v" inputmode="decimal" value="'+esc(r.v==null?'':(met==='w'?(Math.round(wDisp(r.v)*10)/10):r.v))+'"><span class="rv-u mut sm">'+esc(unitFor(met))+'</span></div>';
   }
   function unitFor(m){
     if(m==='w')return S.units;if(m==='k')return 'mmol/L';if(m==='g')return 'mg/dL';
