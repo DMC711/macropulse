@@ -113,6 +113,9 @@ nav.tabs svg{width:22px;height:22px;stroke:currentColor;fill:none;stroke-width:2
 .chip.f{background:#3a2a10;color:var(--org)}
 .ov{position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:40}
 .sh{position:fixed;left:0;right:0;bottom:0;z-index:41;background:#0f161e;border-top:1px solid var(--line);border-radius:22px 22px 0 0;max-width:520px;margin:0 auto;padding:16px 16px calc(18px + env(safe-area-inset-bottom));max-height:92vh;max-height:92dvh;overflow-y:auto}
+.sh select.inp{max-width:100%;min-width:0;text-overflow:ellipsis}
+.sh .field{min-width:0}
+.ls-name{overflow-wrap:anywhere}
 .sh-h{display:flex;justify-content:space-between;align-items:center;margin-bottom:10px}
 .x{width:32px;height:32px;border-radius:50%;background:var(--card2);color:var(--mut)}
 .meal-pills{display:flex;gap:7px;overflow-x:auto;margin-bottom:12px}
@@ -365,8 +368,145 @@ function recipeNut(r){
   return {tot:tot,ser:ser,g:g,n:n};
 }
 function recipeFood(r){var n=recipeNut(r);return {id:r.id,name:r.name||'Untitled recipe',src:'Recipe',srv:'1 serving',g:n.g/n.n,b:n.ser,e:'📖',t:'recipe'}}
-function allFoods(){return DB.concat(customFoods(),S.recipes.map(recipeFood))}
-function foodById(id){var a=allFoods();for(var i=0;i<a.length;i++)if(a[i].id===id)return a[i];return null}
+/* ---- ranked food search ---- */
+var QSYN={mayo:['mayonnaise'],hamburger:['beef','ground'],ghee:['butter','oil','anhydrous'],bell:['sweet'],oj:['orange','juice'],pb:['peanut','butter'],parm:['parmesan'],scallion:['onions','spring'],scallions:['onions','spring'],'half-and-half':['half','and','half'],jerky:['jerky'],'greek':['greek'],noodles:['pasta'],'rice':['rice'],yoghurt:['yogurt'],doughnut:['doughnuts'],donut:['doughnuts'],donuts:['doughnuts'],zoodles:['squash','summer','zucchini'],chips:['chips'],cola:['cola'],soda:['carbonated','beverage']};
+function qWords(q){
+  var w=q.toLowerCase().replace(/[^a-z0-9%\s\-']/g,' ').split(/\s+/).filter(Boolean),o=[];
+  w.forEach(function(x){x=x.replace(/^'+|'+$/g,'');if(!x)return;if(QSYN[x])QSYN[x].forEach(function(y){if(o.indexOf(y)<0)o.push(y)});else o.push(x)});
+  return o;
+}
+function prepFood(f){f.nl=f.name.toLowerCase();f.nw=' '+f.nl.replace(/[,()\/\-]/g,' ').replace(/\s+/g,' ');f.ls=(f.nl+' '+(f.src||'').toLowerCase());f.nc=(f.nl.match(/,/g)||[]).length}
+var QALT={ribeye:['ribeye','rib eye'],'rib-eye':['ribeye','rib eye']};
+function wHit(f,w){
+  var forms=QALT[w]?QALT[w].slice():[w],v=0,i,t,idx,whole;
+  if(!QALT[w]){
+    if(w.length>3&&w.slice(-1)==='s')forms.push(w.slice(0,-1));
+    if(w.length>4&&w.slice(-2)==='es')forms.push(w.slice(0,-2));
+  }
+  for(i=0;i<forms.length;i++){
+    t=forms[i];
+    idx=f.nw.indexOf(' '+t);
+    if(idx>-1){
+      var nx=f.nw.charAt(idx+1+t.length);whole=(nx===''||nx===' ');
+      if(idx===0)v=Math.max(v,whole?5:2);
+      else if(f.nl.indexOf(', '+t)>-1)v=Math.max(v,whole?4:1.5);
+      else v=Math.max(v,whole?3:1);
+    }else if(f.ls.indexOf(t)>-1)v=Math.max(v,0.5);
+  }
+  return v;
+}
+var STAPLE={};[1077,1079,1082,1085,1123,1128,1129,1130,1131,1132,10123,10862,23567,23572,5091,5094,5098,5062,1049,1053,1056,1009,1017,1019,1025,1032,1035,1040,1028,1033,1036,4047,4053,1001,12006,12061,12131,12142,12155,15076,15236,15121,11457,11090,11135,9037,11205,11215].forEach(function(i){STAPLE[i]=1});
+var HW={5:4,4:2.6,3:1.5,2:0.8,1.5:0.5,1:0.2,0.5:0};
+var LOWQ=/\b(babyfood|baby food|restaurant|fast foods|formulated|infant|school lunch|usda commodity)\b/;
+var PROC=/breaded|battered|tenders|nuggets|patties|formed|rotisserie|meatless|imitation|substitute|analog|kit\b|mix\b|dry mix|dehydrated/;
+function scoreFood(f,hits,recentIdx,words){
+  var sc=0,i;
+  for(i=0;i<hits.length;i++)sc-=HW[hits[i]];
+  sc+=f.nl.length*0.035+f.nc*0.45;
+  if(f.t==='usda'){
+    var head=f.nl.split(',')[0].trim();
+    if(STAPLE[f.nid])sc-=2.5;
+    if(words.length&&(head===words[0]||head===words[0]+'s'||head+'s'===words[0]||head===words.join(' ')))sc-=2;
+    if(f.grp===2||f.grp===20||f.grp===23||f.grp===24)sc+=1.5;
+    if(f.grp===3&&words.indexOf('oil')<0)sc+=1.2;
+    if(LOWQ.test(f.nl))sc+=1.2;
+    if(PROC.test(f.nl)&&!words.some(function(w){return PROC.test(w)}))sc+=1.6;
+    if(/, raw\b/.test(f.nl))sc-=1.2;else if(/, cooked/.test(f.nl))sc-=0.3;
+    if(/^[A-Z' ]{4,}[, ]/.test(f.name))sc+=1.0; /* brand-name entries */
+  }
+  if(f.t==='db')sc-=3;
+  if(f.t==='custom'||f.t==='recipe')sc-=8;
+  if(recentIdx>-1)sc-=6-recentIdx*0.05;
+  return sc;
+}
+var VOCAB=null;
+function buildVocab(list){
+  var v={};
+  list.forEach(function(f){f.nw.split(' ').forEach(function(w){if(w.length>2&&/^[a-z]+$/.test(w))v[w]=(v[w]||0)+1})});
+  VOCAB=v;
+}
+function lev(a,b,max){
+  if(Math.abs(a.length-b.length)>max)return max+1;
+  var prev=[],cur,i,j;
+  for(j=0;j<=b.length;j++)prev[j]=j;
+  for(i=1;i<=a.length;i++){
+    cur=[i];var rowMin=i;
+    for(j=1;j<=b.length;j++){cur[j]=Math.min(prev[j]+1,cur[j-1]+1,prev[j-1]+(a.charAt(i-1)===b.charAt(j-1)?0:1));if(cur[j]<rowMin)rowMin=cur[j]}
+    if(rowMin>max)return max+1;
+    prev=cur;
+  }
+  return prev[b.length];
+}
+function corrWord(w){
+  if(!VOCAB||w.length<4||!/^[a-z]+$/.test(w))return w;
+  if(VOCAB[w]||VOCAB[w.replace(/s$/,'')]||VOCAB[w.replace(/es$/,'')])return w;
+  var k,pre=false;for(k in VOCAB){if(k.indexOf(w)===0){pre=true;break}}
+  if(pre)return w;
+  var max=w.length>6?2:1,best=null,bd=99,bc=0,d;
+  for(k in VOCAB){
+    if(k.charAt(0)!==w.charAt(0))continue;
+    d=lev(w,k,max);
+    if(d<=max&&(d<bd||(d===bd&&VOCAB[k]>bc))){best=k;bd=d;bc=VOCAB[k]}
+  }
+  return best||w;
+}
+function searchFoods(list,q,recent,depth){
+  var words=qWords(q),res=[],i,j;
+  if(!words.length)return {list:[],fuzzy:false};
+  recent=recent||[];
+  for(i=0;i<list.length;i++){
+    var f=list[i],hits=[],ok=true;if(!f.nw)prepFood(f);
+    for(j=0;j<words.length;j++){var h=wHit(f,words[j]);if(!h){ok=false;break}hits.push(h)}
+    if(ok)res.push([scoreFood(f,hits,recent.indexOf(f.id),words),f]);
+  }
+  var fuzzy=false;
+  if(!res.length&&!depth&&VOCAB){
+    var cw=words.map(corrWord);
+    if(cw.join(' ')!==words.join(' ')){var r2=searchFoods(list,cw.join(' '),recent,1);if(r2.list.length){r2.corrected=cw.join(' ');return r2}}
+  }
+  if(!res.length&&words.length>1){
+    fuzzy=true;
+    for(i=0;i<list.length;i++){
+      var g=list[i],n=0,hh=[];if(!g.nw)prepFood(g);
+      for(j=0;j<words.length;j++){var h2=wHit(g,words[j]);if(h2){n++;hh.push(h2)}}
+      if(n)res.push([scoreFood(g,hh,recent.indexOf(g.id),words)-n*6,g]);
+    }
+  }
+  res.sort(function(a,b){return a[0]-b[0]||a[1].name.length-b[1].name.length||(a[1].name<b[1].name?-1:1)});
+  return {list:res.map(function(x){return x[1]}),fuzzy:fuzzy,corrected:''};
+}
+
+/* ---------- USDA food library: Standard Reference Release 28 (8,789 foods), loaded from usda.json ---------- */
+var USDA=[],IDX={},usda={state:'idle',n:0,p:null};
+var GEMO=['🧀','🌿','🍼','🫒','🍗','🍲','🌭','🥣','🍎','🥓','🥦','🌰','🥩','🥤','🐟','🫘','🍖','🍞','🍬','🍝','🍔','🍱','🍿','🍽','🍽'];
+DB.forEach(function(f){prepFood(f);IDX[f.id]=f});
+function loadUsda(){
+  if(usda.state==='loading'||usda.state==='ready')return usda.p;
+  usda.state='loading';
+  usda.p=fetch('usda.json').then(function(r){if(!r.ok)throw new Error('http '+r.status);return r.json()}).then(function(j){
+    var out=[];
+    j.f.forEach(function(a){
+      var sv=a[8]||[],g=sv.length?sv[0][0]:100,per={k:a[3],c:a[4],fi:a[5],po:0,p:a[6],f:a[7]},
+        opts=sv.map(function(s){return {srv:String(s[1]).replace(/\s+/g,' ').replace(/\s+,/g,',').trim()+' ('+(Math.round(s[0]*10)/10)+' g)',g:s[0]}}),
+        b0=scale(per,g/100);
+      var f={id:'usda'+a[0],nid:a[0],name:a[1],src:'USDA · '+j.g[a[2]],srv:opts.length?opts[0].srv:'100 g',g:g,
+        b:{k:Math.round(b0.k*10)/10,c:Math.round(b0.c*100)/100,fi:Math.round(b0.fi*100)/100,po:0,p:Math.round(b0.p*100)/100,f:Math.round(b0.f*100)/100},
+        e:GEMO[a[2]]||'🍽',t:'usda',opts:opts,grp:a[2]};
+      prepFood(f);out.push(f);IDX[f.id]=f;
+    });
+    USDA=out;usda.n=out.length;usda.state='ready';buildVocab(DB.concat(out));
+    var r=document.getElementById('results');if(r&&typeof resultsHtml==='function')r.innerHTML=resultsHtml();
+  }).catch(function(){usda.state='error';var r=document.getElementById('results');if(r&&typeof resultsHtml==='function')r.innerHTML=resultsHtml()});
+  return usda.p;
+}
+loadUsda();
+function allFoods(){return DB.concat(USDA,customFoods(),S.recipes.map(recipeFood))}
+function foodById(id){
+  if(IDX[id])return IDX[id];
+  var a=customFoods().concat(S.recipes.map(recipeFood));
+  for(var i=0;i<a.length;i++)if(a[i].id===id)return a[i];
+  return null;
+}
 function seedSample(){
   if(S.seeded)return;
   S.seeded=true;
@@ -429,14 +569,22 @@ function renderLog(){
 }
 
 /* ---------- log sheet ---------- */
+function unitOpts(food){
+  if(!(food.g>0))return [];
+  var out=((food.opts&&food.opts.length)?food.opts:[{srv:food.srv,g:food.g}]).map(function(o){return {srv:o.srv,g:o.g}});
+  [{srv:'100 g',g:100},{srv:'1 oz (28.35 g)',g:28.35}].forEach(function(x){if(!out.some(function(o){return Math.abs(o.g-x.g)<0.01}))out.push(x)});
+  out.push({srv:'1 g',g:1,grams:true});
+  return out;
+}
 function openLogSheet(food,entry){
-  var edit=!!entry,qty=edit?entry.qty:1,meal=edit?entry.meal:ui.meal,b=food.b;
+  var edit=!!entry,qty=edit?entry.qty:1,meal=edit?entry.meal:ui.meal,b=food.b,cur={srv:food.srv,g:food.g,b:food.b,grams:false},opts=edit?[]:unitOpts(food);
   var el=sheet('<div class="sh-h"><div class="eyebrow">'+(edit?'EDITING ENTRY':'LOGGING TO')+' · '+esc(dlabel(ui.date)).toUpperCase()+'</div><button class="x" data-a="close">✕</button></div>'+
     '<div class="meal-pills">'+MEALS.map(function(m){return '<button class="pill'+(m.id===meal?' on':'')+'" data-meal="'+m.id+'">'+m.name+'</button>'}).join('')+'</div>'+
-    '<div class="ls-name">'+esc(food.name)+'</div><div class="mut sm">'+esc(food.src)+' · '+esc(food.srv)+'</div>'+
+    '<div class="ls-name">'+esc(food.name)+'</div><div class="mut sm">'+esc(food.src)+(edit?' · '+esc(food.srv):'')+'</div>'+
+    (opts.length>1?'<div class="field" style="margin:10px 0 0"><label for="ls-u">Unit</label><select class="inp" id="ls-u">'+opts.map(function(o,i){return '<option value="'+i+'">'+esc(o.grams?'Grams (g)':o.srv)+'</option>'}).join('')+'</select></div>':'')+
     '<div class="ls-kcal"><b id="ls-k"></b><span>CALORIES</span></div>'+
-    '<div class="stepper"><button data-s="-1" aria-label="Less">−</button><input id="ls-q" inputmode="decimal" value="'+fq(qty)+'"><span>× serving</span><button data-s="1" aria-label="More">+</button></div>'+
-    '<div class="qq">'+[0.5,1,1.5,2,3].map(function(v){return '<button class="pill" data-q="'+v+'">'+v+'×</button>'}).join('')+'</div>'+
+    '<div class="stepper"><button data-s="-1" aria-label="Less">−</button><input id="ls-q" inputmode="decimal" value="'+fq(qty)+'"><span id="ls-su">× serving</span><button data-s="1" aria-label="More">+</button></div>'+
+    '<div class="qq" id="ls-qq">'+[0.5,1,1.5,2,3].map(function(v){return '<button class="pill" data-q="'+v+'">'+v+'×</button>'}).join('')+'</div>'+
     '<div class="chips" id="ls-chips"></div><div class="mut sm" id="ls-g" style="margin-top:8px"></div>'+
     '<div class="btnrow">'+(edit?'<button class="btn danger" id="ls-del">Delete</button>':'')+'<button class="btn primary" id="ls-ok">'+(edit?'Update':'Log Food')+'</button></div>');
   var inp=$('#ls-q',el);
@@ -444,21 +592,30 @@ function openLogSheet(food,entry){
     var q=num(inp.value);
     $('#ls-k',el).textContent=r0(b.k*q);
     $('#ls-chips',el).innerHTML=chips(b,q);
-    $('#ls-g',el).textContent=food.g?'≈ '+r0(food.g*q)+' g total':'';
+    $('#ls-g',el).textContent=cur.g?'≈ '+r0(cur.g*q)+' g total':'';
     $('#ls-ok',el).disabled=!(q>0);
   }
   inp.addEventListener('input',upd);
   el.addEventListener('click',function(ev){
     var t=ev.target;
     if(t.dataset.meal){meal=t.dataset.meal;[].forEach.call(el.querySelectorAll('[data-meal]'),function(x){x.classList.toggle('on',x.dataset.meal===meal)})}
-    if(t.dataset.s){var q=Math.max(0.25,Math.round((num(inp.value)+0.25*Number(t.dataset.s))*100)/100);inp.value=fq(q);upd()}
+    if(t.dataset.s){var stp=cur.grams?10:0.25,q=Math.max(cur.grams?1:0.25,Math.round((num(inp.value)+stp*Number(t.dataset.s))*100)/100);inp.value=fq(q);upd()}
     if(t.dataset.q){inp.value=t.dataset.q;upd()}
+  });
+  var us=$('#ls-u',el);
+  if(us)us.addEventListener('change',function(){
+    var o=opts[Number(us.value)],pg=scale(food.b,1/food.g);
+    cur={srv:o.grams?'1 g':o.srv,g:o.g,b:scale(pg,o.g),grams:!!o.grams};b=cur.b;
+    inp.value=cur.grams?'100':'1';
+    $('#ls-su',el).textContent=cur.grams?'g':'× serving';
+    $('#ls-qq',el).innerHTML=(cur.grams?[50,100,150,200,250]:[0.5,1,1.5,2,3]).map(function(v){return '<button class="pill" data-q="'+v+'">'+v+(cur.grams?' g':'×')+'</button>'}).join('');
+    upd();
   });
   $('#ls-ok',el).addEventListener('click',function(){
     var q=num(inp.value);if(!(q>0))return;
     if(edit){var list=S.log[ui.date]||[];list.forEach(function(e){if(e.id===entry.id){e.qty=q;e.meal=meal}});toast('Updated')}
     else{
-      (S.log[ui.date]=S.log[ui.date]||[]).push({id:uid(),meal:meal,name:food.name,srv:food.srv,qty:q,b:food.b,ref:food.id,ts:Date.now()});
+      (S.log[ui.date]=S.log[ui.date]||[]).push({id:uid(),meal:meal,name:food.name,srv:cur.srv,qty:q,b:cur.b,ref:food.id,ts:Date.now()});
       S.recent=[food.id].concat(S.recent.filter(function(x){return x!==food.id})).slice(0,25);
       ui.meal=meal;toast('Logged to '+MEALS.filter(function(m){return m.id===meal})[0].name);
     }
@@ -473,12 +630,15 @@ function openLogSheet(food,entry){
 
 /* ---------- SEARCH ---------- */
 function filtered(){
-  var q=ui.q.trim().toLowerCase(),f=ui.filter,list=allFoods();
+  var q=ui.q.trim().toLowerCase(),f=ui.filter,list;
+  ui.fuzzy=false;
   if(f==='recent')list=S.recent.map(foodById).filter(Boolean);
   else if(f==='fav')list=S.fav.map(foodById).filter(Boolean);
-  else if(f==='custom')list=list.filter(function(x){return x.t==='custom'});
-  else if(f==='recipes')list=list.filter(function(x){return x.t==='recipe'});
-  if(q){var words=q.split(/\s+/);list=list.filter(function(x){var s=(x.name+' '+x.src).toLowerCase();return words.every(function(w){return s.indexOf(w)>-1})})}
+  else if(f==='custom')list=allFoods().filter(function(x){return x.t==='custom'});
+  else if(f==='recipes')list=allFoods().filter(function(x){return x.t==='recipe'});
+  else list=q?allFoods():DB.concat(customFoods(),S.recipes.map(recipeFood));
+  ui.corrected='';
+  if(q){var r=searchFoods(list,q,S.recent);ui.fuzzy=r.fuzzy;ui.corrected=r.corrected||'';return r.list}
   if(f==='all'||f==='fav'){
     list=list.slice().sort(function(a,b){
       var ra=S.recent.indexOf(a.id),rb=S.recent.indexOf(b.id);
@@ -492,10 +652,33 @@ function foodRow(f){
   var fav=S.fav.indexOf(f.id)>-1;
   return '<div class="frow" data-a="pick" data-id="'+f.id+'"><div class="fh"><div class="fico">'+f.e+'</div><div class="fmid"><div class="fname">'+esc(f.name)+'</div><div class="mut sm">'+esc(f.src)+' · '+esc(f.srv)+'</div></div><div class="fk"><b>'+r0(f.b.k)+'</b><span>KCAL</span></div><button class="star'+(fav?' on':'')+'" data-a="fav" data-id="'+f.id+'" aria-label="Favorite">★</button></div><div class="chips">'+chips(f.b,1)+'</div></div>';
 }
+function onlineHtml(){
+  var o=ui.online,h='<div class="card" style="margin-top:12px"><div class="mut sm" style="margin-bottom:8px">Packaged or branded food not listed above?</div><button class="btn" data-a="onlinesearch" style="width:100%;white-space:normal">Search packaged foods online</button><div class="mut sm" style="margin-top:6px">Uses Open Food Facts (community data).</div>';
+  if(o&&o.q===ui.q.trim()){
+    if(o.state==='loading')h+='<div class="mut sm" style="margin-top:10px">Searching...</div>';
+    else if(o.state==='error')h+='<div class="warn" style="margin-top:10px">The online search did not respond. Try again in a moment.</div>';
+    else if(!o.items.length)h+='<div class="mut sm" style="margin-top:10px">Nothing found online for that search.</div>';
+    else h+='<div style="margin-top:10px">'+o.items.map(function(f,i){return '<div class="frow" data-a="onlinepick" data-i="'+i+'"><div class="fh"><div class="fico">🏷️</div><div class="fmid"><div class="fname">'+esc(f.name)+'</div><div class="mut sm">'+esc(f.src||'Open Food Facts')+' · '+esc(f.srv)+'</div></div><div class="fk"><b>'+r0(f.b.k)+'</b><span>KCAL</span></div></div></div>'}).join('')+'<div class="note">Community-entered data. Verify against the label. Tapping a food saves it to your Custom list.</div></div>';
+  }
+  return h+'</div>';
+}
 function resultsHtml(){
-  var list=filtered(),shown=list.slice(0,80);
-  if(!list.length)return '<div class="empty">'+(ui.filter==='all'?'No matches. Add it on the Custom tab.':ui.filter==='recent'?'Foods you log will show up here.':ui.filter==='fav'?'Tap the star on a food to save it here.':ui.filter==='custom'?'No custom foods yet. Create one on the Custom tab.':'No saved recipes yet. Build one on the Recipes tab.')+'</div>';
-  return '<div class="cnt">'+list.length+' '+(list.length===1?'MATCH':'MATCHES')+(list.length>shown.length?' (SHOWING '+shown.length+')':'')+'</div>'+shown.map(foodRow).join('');
+  var list=filtered(),lim=ui.lim||60,shown=list.slice(0,lim),h='',q=ui.q.trim();
+  if(ui.filter==='all'){
+    if(usda.state==='idle'||usda.state==='loading')h+='<div class="note" style="margin:0 2px 10px">Loading the USDA food library (first time only, about 1 MB)...</div>';
+    else if(usda.state==='error')h+='<div class="warn" style="margin-bottom:10px">The USDA food library did not load. Check your connection. <button class="pill" data-a="usdaretry">Retry</button></div>';
+    else if(!q)h+='<div class="note" style="margin:0 2px 10px">Type above to search <b>'+usda.n.toLocaleString()+' USDA foods</b> (Standard Reference, Release 28) along with your own foods and recipes. Below is your starter list.</div>';
+  }
+  if(!list.length){
+    h+='<div class="empty">'+(ui.filter==='all'?(q?'No matches for "'+esc(q)+'". Try fewer or different words, or search online below.':'No matches. Add it on the Custom tab.'):ui.filter==='recent'?'Foods you log will show up here.':ui.filter==='fav'?'Tap the star on a food to save it here.':ui.filter==='custom'?'No custom foods yet. Create one on the Custom tab.':'No saved recipes yet. Build one on the Recipes tab.')+'</div>';
+  }else{
+    if(ui.corrected)h+='<div class="note" style="margin:0 2px 8px">Showing results for "'+esc(ui.corrected)+'".</div>';
+    if(ui.fuzzy)h+='<div class="note" style="margin:0 2px 8px">No food has all of those words, so these are the closest matches.</div>';
+    h+='<div class="cnt">'+list.length.toLocaleString()+' '+(list.length===1?'MATCH':'MATCHES')+(list.length>shown.length?' (SHOWING '+shown.length+')':'')+'</div>'+shown.map(foodRow).join('');
+    if(list.length>shown.length)h+='<button class="btn" data-a="more" style="width:100%;margin-bottom:6px">Show more</button>';
+  }
+  if(ui.filter==='all'&&q.length>1)h+=onlineHtml();
+  return h;
 }
 function renderSearch(){
   var fl=[['all','All'],['recent','Recent'],['fav','Favorites'],['custom','Custom'],['recipes','Recipes']];
@@ -582,14 +765,14 @@ function recipeEditor(){
 }
 function renderRecipes(){return ui.rd?recipeEditor():recipeList()}
 function openIngPicker(){
-  var base=DB.concat(customFoods()),q='';
+  var base=allFoods().filter(function(x){return x.t!=='recipe'}),q='';
   var el=sheet('<div class="sh-h"><div class="eyebrow">ADD INGREDIENT</div><button class="x" data-a="close">✕</button></div><input class="inp" id="ip-q" type="search" placeholder="Search foods" autocomplete="off" style="margin-bottom:10px"><div id="ip-list"></div>');
   function draw(){
-    var w=q.toLowerCase().split(/\s+/).filter(Boolean);
-    var list=base.filter(function(x){var s=(x.name+' '+x.src).toLowerCase();return w.every(function(t){return s.indexOf(t)>-1})}).slice(0,60);
+    var list=q.trim()?searchFoods(base,q,S.recent).list.slice(0,60):base.filter(function(x){return x.t!=='usda'}).slice(0,60);
     $('#ip-list',el).innerHTML=list.length?list.map(function(f){return '<button class="rowitem" style="width:100%;text-align:left" data-pick="'+f.id+'"><div class="rn">'+f.e+' '+esc(f.name)+'<div class="mut sm">'+esc(f.srv)+' · '+r0(f.b.k)+' kcal</div></div><span class="pill">Add</span></button>'}).join(''):'<div class="empty">No matches.</div>';
   }
   $('#ip-q',el).addEventListener('input',function(e){q=e.target.value;draw()});
+  if(usda.p)usda.p.then(function(){if(document.body.contains(el)){base=allFoods().filter(function(x){return x.t!=='recipe'});draw()}});
   el.addEventListener('click',function(ev){
     var b=ev.target.closest('[data-pick]');if(!b)return;
     var f=foodById(b.dataset.pick);if(!f)return;
@@ -666,6 +849,33 @@ function openScanner(mode){
     $('#sc-wrap',el).style.display='none';
     status.textContent='Camera permission was denied or no camera was found. Type the barcode number below, or allow camera access for this site in your phone settings.';
   });
+}
+function offToFood(p){
+  var n=p.nutriments||{},hasSrv=n['energy-kcal_serving']!=null||n['carbohydrates_serving']!=null||n['proteins_serving']!=null,sfx=hasSrv?'_serving':'_100g';
+  function nv(k){var v=n[k+sfx];return v==null||v===''?0:num(v)}
+  var kcal=n['energy-kcal'+sfx]!=null?num(n['energy-kcal'+sfx]):(n['energy'+sfx]!=null?num(n['energy'+sfx])/4.184:0);
+  var c=nv('carbohydrates'),fi=nv('fiber'),po=nv('polyols'),pr=nv('proteins'),fa=nv('fat');
+  if(!(kcal>0))kcal=4*pr+9*fa+4*Math.max(0,c-fi-po);
+  if(!(kcal>0)&&!(c>0)&&!(pr>0)&&!(fa>0))return null;
+  var g=hasSrv?(num(p.serving_quantity)>0?num(p.serving_quantity):100):100;
+  return {id:uid(),bc:p.code?String(p.code):undefined,name:String(p.product_name||p.generic_name||'').trim(),src:String(p.brands||'').split(',')[0].trim(),
+    srv:hasSrv?String(p.serving_size||'1 serving').trim():'100 g',g:g,b:{k:Math.round(kcal),c:Math.round(c*10)/10,fi:Math.round(fi*10)/10,po:Math.round(po*10)/10,p:Math.round(pr*10)/10,f:Math.round(fa*10)/10}};
+}
+function onlineSearch(){
+  var q=ui.q.trim();if(q.length<2)return;
+  ui.online={q:q,state:'loading',items:[]};$('#results').innerHTML=resultsHtml();
+  var url='https://world.openfoodfacts.org/cgi/search.pl?search_terms='+encodeURIComponent(q)+'&search_simple=1&action=process&json=1&page_size=20&fields=code,product_name,generic_name,brands,serving_size,serving_quantity,nutriments';
+  fetch(url).then(function(r){if(!r.ok)throw new Error('http');return r.json()}).then(function(j){
+    if(!ui.online||ui.online.q!==q)return;
+    var items=((j&&j.products)||[]).map(function(p){return (p.product_name||p.generic_name)?offToFood(p):null}).filter(Boolean).slice(0,15);
+    ui.online={q:q,state:'done',items:items};$('#results').innerHTML=resultsHtml();
+  }).catch(function(){if(ui.online&&ui.online.q===q){ui.online.state='error';$('#results').innerHTML=resultsHtml()}});
+}
+function onlinePick(el){
+  var f=ui.online&&ui.online.items[Number(el.dataset.i)];if(!f)return;
+  var dup=f.bc?S.custom.filter(function(c){return c.bc===f.bc})[0]:null;
+  if(!dup){S.custom.push(f);save();dup=f;toast('Saved to your Custom foods. Verify against the label.')}
+  var cf=foodById(dup.id);if(cf)openLogSheet(cf);
 }
 function lookupBarcode(code,mode){
   code=String(code).replace(/\D/g,'');
@@ -907,7 +1117,14 @@ function goalProj(){
   r.last=pts[pts.length-1];r.trend=r.ema[r.ema.length-1].t;
   var win=pts.filter(function(p){return p.x>=r.last.x-S.trendDays+1});
   r.n=win.length;r.span=win.length?win[win.length-1].x-win[0].x:0;
-  if(win.length>=4&&r.span>=6)r.slope=regress(win);
+  r.days=r.span+1;
+  if(win.length>=3&&r.span>=4)r.obs=regress(win); /* observed rate, shown for information only */
+  /* project only once there are 14+ days and 6+ weigh-ins, and never faster than 1% of body weight per week */
+  if(win.length>=6&&r.span>=13&&r.obs!=null){
+    var cap=0.01*r.trend/7;
+    r.slope=Math.max(-cap,Math.min(cap,r.obs));
+    r.capped=Math.abs(r.obs)>cap+1e-9;r.capLb=cap*7;
+  }
   r.startW=S.goalStartW||pts[0].w;
   if(r.hasGoal){
     var gx=dn(S.goalDate),tx=dn(today());
@@ -935,18 +1152,19 @@ function goalCardHtml(){
   h+='<div class="goalline"><b>'+wFmt(S.goalW)+' '+u+'</b> by <b>'+esc(dnLabelY(dn(S.goalDate)))+'</b><span class="mut sm"> · '+(gp.daysLeft>0?gp.daysLeft+' days left':gp.daysLeft===0?'target date is today':'target date passed')+'</span></div>';
   if(gp.none){return h+'<div class="empty" style="margin-top:8px">Log a weigh-in to start tracking toward this goal.</div>'}
   h+='<div class="track" style="margin-top:10px;height:9px"><div class="fill" style="width:'+gp.pct+'%;background:linear-gradient(90deg,var(--blue),var(--teal))"></div></div><div class="mut sm" style="display:flex;justify-content:space-between;margin-top:5px"><span>Start '+wFmt(gp.startW)+'</span><span>'+r0(gp.pct)+'% there</span><span>Goal '+wFmt(S.goalW)+'</span></div>';
-  var rate=gp.slope==null?null:gp.slope*7;
+  var rate=gp.obs==null?null:gp.obs*7;
   h+='<div class="tiles2">'+
     '<div class="tile"><div class="tl">TREND WEIGHT</div><b>'+wFmt(gp.trend)+'<small> '+u+'</small></b><div class="ts">'+(gp.reached?'Goal reached':signedW(gp.toGoalLb)+' '+u+' to go')+'</div></div>'+
-    '<div class="tile"><div class="tl">RATE (LAST '+Math.min(S.trendDays,Math.max(gp.span+1,1))+' DAYS)</div><b class="'+(rate==null?'':(rate*gp.dir>0?'neg':'pos'))+'">'+(rate==null?'–':signedW(rate,2))+'<small> '+u+'/wk</small></b><div class="ts">'+(rate==null?'Need 4+ weigh-ins over 7+ days':gp.n+' weigh-ins')+'</div></div>'+
+    '<div class="tile"><div class="tl">RATE (LAST '+Math.min(S.trendDays,Math.max(gp.span+1,1))+' DAYS)</div><b class="'+(rate==null?'':(rate*gp.dir>0?'neg':'pos'))+'">'+(rate==null?'–':signedW(rate,2))+'<small> '+u+'/wk</small></b><div class="ts">'+(rate==null?'Need 3+ weigh-ins over 5+ days':gp.n+' weigh-ins'+(gp.slope==null?', too early to project':gp.capped?', projection capped':''))+'</div></div>'+
     '<div class="tile"><div class="tl">PROJECTED ON TARGET DATE</div><b>'+(gp.projTarget==null?'–':wFmt(gp.projTarget))+'<small> '+u+'</small></b><div class="ts">'+(gp.projTarget==null?'':gp.onPace?'Meets goal by '+Math.abs(wDisp(gp.projTarget)-wDisp(S.goalW)).toFixed(1)+' '+u:'Misses goal by '+Math.abs(wDisp(gp.projTarget)-wDisp(S.goalW)).toFixed(1)+' '+u)+'</div></div>'+
-    '<div class="tile"><div class="tl">PROJECTED GOAL DATE</div><b style="font-size:17px">'+(gp.reached?'Reached':gp.hitX==null?'Not on pace':esc(dnLabelY(gp.hitX)))+'</b><div class="ts">'+(gp.hitX!=null?(gp.hitX<=dn(S.goalDate)?Math.round(dn(S.goalDate)-gp.hitX)+' days ahead of target':Math.round(gp.hitX-dn(S.goalDate))+' days after target'):gp.reached?'':'Current trend is not heading to the goal')+'</div></div></div>';
+    '<div class="tile"><div class="tl">PROJECTED GOAL DATE</div><b style="font-size:17px">'+(gp.reached?'Reached':gp.slope==null?'Too early':gp.hitX==null?'Not on pace':esc(dnLabelY(gp.hitX)))+'</b><div class="ts">'+(gp.hitX!=null?(gp.hitX<=dn(S.goalDate)?Math.round(dn(S.goalDate)-gp.hitX)+' days ahead of target':Math.round(gp.hitX-dn(S.goalDate))+' days after target'):gp.reached||gp.slope==null?'':'Current trend is not heading to the goal')+'</div></div></div>';
   var msg='';
   if(gp.reached)msg='<span class="neg">Your trend weight has reached your goal.</span>';
-  else if(gp.slope==null)msg='Log your weight on 4 or more days across at least a week and the projection will appear.';
-  else if(gp.onPace)msg='<span class="neg">On pace.</span> At your current rate you finish at about '+wFmt(gp.projTarget)+' '+u+' on the target date.';
-  else if(gp.needWeek!=null)msg='<span class="pos">Behind pace.</span> You need about '+signedW(gp.needWeek,2)+' '+u+'/wk from here to hit the target date; you are at '+signedW(gp.slope*7,2)+' '+u+'/wk.';
+  else if(gp.slope==null)msg='<span class="pos">Too early to project.</span> You have '+gp.n+' weigh-in'+(gp.n===1?'':'s')+' over '+gp.days+' day'+(gp.days===1?'':'s')+'. Projections start after 14 days and at least 6 weigh-ins. The first weeks of a low-carb diet are mostly water, so the early rate is much faster than what you can sustain, and projecting it would overstate your results.';
+  else if(gp.onPace)msg='<span class="neg">On pace.</span> At '+(gp.capped?'the capped':'your current')+' rate you finish at about '+wFmt(gp.projTarget)+' '+u+' on the target date.';
+  else if(gp.needWeek!=null)msg='<span class="pos">Behind pace.</span> You need about '+signedW(gp.needWeek,2)+' '+u+'/wk from here to hit the target date; you are projected at '+signedW(gp.slope*7,2)+' '+u+'/wk.';
   h+='<div class="note" style="margin:2px 0 4px;color:var(--tx)">'+msg+'</div>';
+  if(gp.slope!=null)h+='<div class="note" style="margin:0 0 4px">'+(gp.capped?'Your recent rate ('+signedW(gp.obs*7,1)+' '+u+'/wk) is faster than is usually sustainable, so the projection uses '+signedW(Math.sign(gp.obs)*gp.capLb,1)+' '+u+'/wk (1% of body weight per week). ':'')+'Weight loss normally slows over time, so treat the projection as a best case, not a forecast.</div>';
   if(gp.slope!=null){
     var rows='',tx=dn(today());
     for(var i=1;i<=7;i++){var x=tx+i;rows+='<tr><td>'+esc(dnLabel(x))+'</td><td>'+wFmt(projAt(gp,x))+' '+u+'</td></tr>'}
@@ -1170,7 +1388,6 @@ function prepForOcr(canvas,invert){
   for(i=0;i<n;i++){var v=(lum[i]-lo)/rg*255;v=v<0?0:v>255?255:v;if(inv)v=255-v;d[i*4]=d[i*4+1]=d[i*4+2]=v;d[i*4+3]=255}
   x.putImageData(im,0,0);return {canvas:c,dark:dark};
 }
-var BIGNUM=/^\d{1,4}(?:[.,]\d{1,2})?%?$/;
 var MONTHS='jan feb mar apr may jun jul aug sep oct nov dec'.split(' ');
 function findDate(text){
   var t=today(),lines=text.split(/\n/),best=null;
@@ -1416,94 +1633,6 @@ function dedupePhotos(results){
     for(var k2 in mine)have[k2]=1;
   });
 }
-/* ---- big numbers: the large weight at the top of a scale screen, large values the first pass garbled, and the time shown on the photo ---- */
-function closeRead(worker,canvas,b,target){
-  var hh=b.y1-b.y0,pad=Math.round(hh*0.35),th=Math.max(1,target/hh),sx=Math.max(0,b.x0-pad),sy=Math.max(0,b.y0-pad),sw=Math.min(canvas.width-sx,b.x1-b.x0+2*pad),sh=Math.min(canvas.height-sy,hh+2*pad);
-  var c=document.createElement('canvas');c.width=Math.round(sw*th)+40;c.height=Math.round(sh*th)+40;
-  var x=c.getContext('2d');x.fillStyle='#fff';x.fillRect(0,0,c.width,c.height);x.drawImage(canvas,sx,sy,sw,sh,20,20,Math.round(sw*th),Math.round(sh*th));
-  return worker.recognize(c).then(function(res){var m=(res.data.text||'').trim().replace(/[^0-9]+$/,'').match(/^\d{1,4}(?:\.\d{1,2})?$/);return m?m[0]:null});
-}
-function pickWeight(r1,r2,grp){
-  var re=/^\d{2,3}\.\d{1,2}$/;
-  if(r1&&re.test(r1))return parseFloat(r1);
-  if(r2&&re.test(r2))return parseFloat(r2);
-  if(grp.length===2&&/^\d{2,3}$/.test(grp[0].t)&&/^\d$/.test(grp[1].t))return parseFloat(grp[0].t+'.'+grp[1].t);
-  var r=r1||r2;return r?parseFloat(r):null;
-}
-function findPhotoTime(ws,hero){
-  var found=[];
-  ws.forEach(function(w,i){
-    var m=w.t.match(/^(\d{1,2}):(\d{2})([AaPp])?\.?[Mm]?\.?$/);if(!m)return;
-    var hh=Number(m[1]),mi=Number(m[2]),ap=m[3];
-    if(!ap){var nx=ws[i+1];if(nx&&/^[ap]\.?m\.?$/i.test(nx.t)&&Math.abs((nx.y0+nx.y1)/2-(w.y0+w.y1)/2)<w.h)ap=nx.t.charAt(0)}
-    if(ap){ap=ap.toLowerCase();if(hh<1||hh>12)return;if(ap==='p'&&hh<12)hh+=12;if(ap==='a'&&hh===12)hh=0}
-    if(hh>23||mi>59)return;
-    found.push({min:hh*60+mi,cx:(w.x0+w.x1)/2,cy:(w.y0+w.y1)/2});
-  });
-  if(!found.length)return null;
-  if(hero){
-    var hx=(hero.box.x0+hero.box.x1)/2,hy=(hero.box.y0+hero.box.y1)/2;
-    found.sort(function(a,b){return Math.hypot(a.cx-hx,a.cy-hy)-Math.hypot(b.cx-hx,b.cy-hy)});
-    return found[0].min;
-  }
-  var uniq={};found.forEach(function(f){uniq[f.min]=1});
-  return Object.keys(uniq).length===1?found[0].min:null;
-}
-function readBigNumbers(worker,canvas,words){
-  var ws=(words||[]).filter(function(w){return w.text&&w.text.trim()}).map(function(w){return {t:w.text.trim(),c:w.confidence,x0:w.bbox.x0,y0:w.bbox.y0,x1:w.bbox.x1,y1:w.bbox.y1,h:w.bbox.y1-w.bbox.y0}});
-  var out={words:ws,hero:null,time:null};
-  var hs=ws.map(function(w){return w.h}).sort(function(a,b){return a-b}),med=hs.length?hs[Math.floor(hs.length/2)]:0;
-  if(!med)return Promise.resolve(out);
-  var big=ws.filter(function(w){return w.h>=1.4*med&&/\d/.test(w.t)}),hero=null;
-  /* the weight: the tallest number, clearly larger than the other big numbers, followed by a weight unit */
-  if(big.length){
-    var tall=big.slice().sort(function(a,b){return b.h-a.h})[0],tcy=(tall.y0+tall.y1)/2;
-    var others=big.filter(function(w){return Math.abs((w.y0+w.y1)/2-tcy)>0.6*tall.h});
-    var oh=others.reduce(function(m,w){return Math.max(m,w.h)},0);
-    if(!others.length||tall.h>=1.3*oh){
-      var grp=[tall],grew=true;
-      while(grew){grew=false;big.forEach(function(w){
-        if(grp.indexOf(w)>=0||Math.abs((w.y0+w.y1)/2-tcy)>0.4*tall.h)return;
-        grp.slice().forEach(function(g){var gap=w.x0>=g.x1?w.x0-g.x1:g.x0>=w.x1?g.x0-w.x1:0;if(grp.indexOf(w)<0&&gap<0.8*tall.h){grp.push(w);grew=true}});
-      })}
-      grp.sort(function(a,b){return a.x0-b.x0});
-      var box={x0:grp[0].x0,y0:Math.min.apply(null,grp.map(function(g){return g.y0})),x1:grp[grp.length-1].x1,y1:Math.max.apply(null,grp.map(function(g){return g.y1}))},unit=null;
-      ws.forEach(function(w){
-        var cy=(w.y0+w.y1)/2;
-        if(unit||cy<box.y0-0.3*tall.h||cy>box.y1+0.3*tall.h||w.x1<=(box.x0+box.x1)/2||w.x0-box.x1>3*tall.h)return;
-        if(/^(?:[lji1I|]bs?|kg)$/i.test(w.t))unit=/kg/i.test(w.t)?'kg':'lb';
-      });
-      if(unit)hero={grp:grp,box:box,unit:unit};
-    }
-  }
-  out.words=ws.filter(function(w){return !hero||hero.grp.indexOf(w)<0});
-  out.time=findPhotoTime(ws,hero);
-  var chain=worker.setParameters({tessedit_char_whitelist:'0123456789.',tessedit_pageseg_mode:'7'});
-  if(hero){
-    var r1=null,r2=null;
-    chain=chain.then(function(){return closeRead(worker,canvas,hero.box,90)}).then(function(a){r1=a;return closeRead(worker,canvas,hero.box,200)}).then(function(b){
-      r2=b;
-      var v=pickWeight(r1,r2,hero.grp);
-      if(v!=null&&hero.unit==='kg')v=Math.round(v*LB*10)/10;
-      if(v!=null&&v>=50&&v<=700)out.hero={m:'w',v:v,label:'Weight',unit:hero.unit,on:true};
-    });
-  }
-  /* any other large number the first pass could not read cleanly (for example 41.3 read as a symbol and a 3) */
-  big.filter(function(w){return (!hero||hero.grp.indexOf(w)<0)&&!BIGNUM.test(w.t)}).forEach(function(w){
-    chain=chain.then(function(){return closeRead(worker,canvas,w,90)}).then(function(r){if(r){w.t=r+(w.t.indexOf('%')>=0?'%':'');w.c=80}});
-  });
-  return chain.then(function(){return worker.setParameters({tessedit_char_whitelist:'',tessedit_pageseg_mode:'3'})}).then(function(){return out},function(){return out});
-}
-/* the scale shows one decimal at most; a second decimal is a misread (for example the l of "lb") */
-function roundRows(rows){
-  rows.forEach(function(r){
-    if(r.v==null)return;
-    var dec=null;
-    if(r.m==='w')dec=1;
-    else if(r.m.slice(0,2)==='p:'){var pr=PRESETS.filter(function(x){return x.key===r.m.slice(2)})[0];if(pr)dec=pr.dec}
-    if(dec!=null){var f=Math.pow(10,dec);r.v=Math.round(r.v*f)/f}
-  });
-}
 function importFiles(files){
   var list=[].slice.call(files).slice(0,6);if(!list.length)return;
   var el=sheet('<div class="sh-h"><div class="eyebrow">READING PHOTOS</div><button class="x" data-a="close">✕</button></div><div id="ocr-s" class="mut">Loading reader (first time only, about 7 MB)...</div><div class="track" style="margin-top:12px"><div class="fill" id="ocr-b" style="width:3%;background:var(--teal)"></div></div><div class="note" style="margin-top:12px">Photos are read on your phone. Nothing is uploaded.</div>');
@@ -1530,22 +1659,18 @@ function importFiles(files){
         if(cancelled)return;
         return fileToCanvas(f).then(function(cv){
           var p1=prepForOcr(cv,null),W=p1.canvas.width;
-          function rowsFrom(r,wl){
-            var ws=wl||(r.data.words||[]).map(function(w){return {t:w.text,c:w.confidence,x0:w.bbox.x0,y0:w.bbox.y0,x1:w.bbox.x1,y1:w.bbox.y1}});
+          function rowsFrom(r){
+            var ws=(r.data.words||[]).map(function(w){return {t:w.text,c:w.confidence,x0:w.bbox.x0,y0:w.bbox.y0,x1:w.bbox.x1,y1:w.bbox.y1}});
             var rows=ws.length?parseWords(ws,W):[];
             return rows.length?rows:parseOcr(r.data.text||'');
           }
           return worker.recognize(p1.canvas).then(function(r1){
-            var t=r1.data.text||'';
-            return readBigNumbers(worker,p1.canvas,r1.data.words).then(function(big){
-            var rows=rowsFrom(r1,big.words);
-            if(big.hero){rows.forEach(function(r){if(r.m==='w')r.on=false});rows.unshift(big.hero)}
-            if(rows.length)return fixDecimals(worker,p1.canvas,rows).then(function(){roundRows(rows);return {t:t,rows:rows,time:big.time}});
+            var t=r1.data.text||'',rows=rowsFrom(r1);
+            if(rows.length)return fixDecimals(worker,p1.canvas,rows).then(function(){return {t:t,rows:rows}});
             var p2=prepForOcr(cv,!p1.dark);
             return worker.recognize(p2.canvas).then(function(r2){var t2=r2.data.text||'';return {t:t+'\n'+t2,rows:rowsFrom(r2)}});
-            });
           });
-        }).then(function(o){results.push({file:f,url:URL.createObjectURL(f),date:findDate(o.t),time:o.time==null?null:o.time,rows:o.rows,text:o.t})});
+        }).then(function(o){results.push({file:f,url:URL.createObjectURL(f),date:findDate(o.t),rows:o.rows,text:o.t})});
       });
     });
     return chain;
@@ -1559,7 +1684,7 @@ function showImportReview(results,warn){
   var el=sheet('<div class="sh-h"><div class="eyebrow">REVIEW BEFORE SAVING</div><button class="x" data-a="close">✕</button></div>'+(warn?'<div class="warn" style="margin-bottom:10px">'+esc(warn)+'</div>':'')+'<div class="note" style="margin-bottom:10px">Check every number against your photo. Untick or change anything that was misread. Only ticked rows are saved.</div><div id="rv-body"></div><div class="btnrow"><button class="btn primary" id="rv-ok">Save ticked rows</button></div>');
   function rowHtml(pi,ri,r){
     var met=r.m;
-    return '<div class="rvrow" data-p="'+pi+'" data-r="'+ri+'"><input type="checkbox" class="rv-on" '+(r.on?'checked':'')+' aria-label="Include"><select class="inp rv-m">'+metricOptions(rowMetricKey(met))+'</select><input class="inp rv-v" inputmode="decimal" value="'+esc(r.v==null?'':(met==='w'?(Math.round(wDisp(r.v)*10)/10):r.v))+'"><span class="rv-u mut sm">'+esc(unitFor(met))+'</span></div>';
+    return '<div class="rvrow" data-p="'+pi+'" data-r="'+ri+'"><input type="checkbox" class="rv-on" '+(r.on?'checked':'')+' aria-label="Include"><select class="inp rv-m">'+metricOptions(met)+'</select><input class="inp rv-v" inputmode="decimal" value="'+esc(r.v==null?'':(met==='w'?(Math.round(wDisp(r.v)*10)/10):r.v))+'"><span class="rv-u mut sm">'+esc(unitFor(met))+'</span></div>';
   }
   function unitFor(m){
     if(m==='w')return S.units;if(m==='k')return 'mmol/L';if(m==='g')return 'mg/dL';
@@ -1569,8 +1694,9 @@ function showImportReview(results,warn){
     return '';
   }
   function draw(){
+    results.forEach(function(p){p.rows.forEach(function(r){r.m=rowMetricKey(r.m)})});
     $('#rv-body',el).innerHTML=results.map(function(p,pi){
-      return '<div class="rvphoto"><div style="display:flex;gap:12px;align-items:flex-start"><img src="'+p.url+'" alt="Photo '+(pi+1)+'" class="rvimg"><div style="flex:1;min-width:0"><div class="field" style="margin-bottom:6px"><label>Date for this photo</label><input class="inp rv-d" type="date" data-p="'+pi+'" value="'+(p.date||ui.date)+'" max="'+today()+'"></div>'+(p.date?'<div class="mut sm">Date found in the photo</div>':'<div class="mut sm">No date found, using '+esc(dlabel(ui.date))+'</div>')+'<div class="field" style="margin:8px 0 6px"><label>Time of reading</label><input class="inp rv-tm" type="time" data-p="'+pi+'" value="'+(p.time==null?'':pad(Math.floor(p.time/60))+':'+pad(p.time%60))+'"></div>'+(p.time!=null?'<div class="mut sm">Time found in the photo</div>':'<div class="mut sm">No time found, using the time you save</div>')+'</div></div>'+
+      return '<div class="rvphoto"><div style="display:flex;gap:12px;align-items:flex-start"><img src="'+p.url+'" alt="Photo '+(pi+1)+'" class="rvimg"><div style="flex:1;min-width:0"><div class="field" style="margin-bottom:6px"><label>Date for this photo</label><input class="inp rv-d" type="date" data-p="'+pi+'" value="'+(p.date||ui.date)+'" max="'+today()+'"></div>'+(p.date?'<div class="mut sm">Date found in the photo</div>':'<div class="mut sm">No date found, using '+esc(dlabel(ui.date))+'</div>')+'</div></div>'+
         (p.rows.length?'':'<div class="warn" style="margin:8px 0 4px">No numbers were recognized. Add them below.</div>')+
         '<div id="rows-'+pi+'">'+p.rows.map(function(r,ri){return rowHtml(pi,ri,r)}).join('')+'</div><button class="btn sm" data-addrow="'+pi+'" style="margin-top:8px">+ Add a row</button>'+
         '<details style="margin-top:8px"><summary class="mut sm">Text the reader saw</summary><pre class="rvtxt">'+esc(p.text||'(none)')+'</pre></details></div>';
@@ -1584,7 +1710,6 @@ function showImportReview(results,warn){
   el.addEventListener('change',function(ev){
     var t=ev.target,row=t.closest('.rvrow');
     if(t.classList.contains('rv-d')){results[Number(t.dataset.p)].date=t.value;return}
-    if(t.classList.contains('rv-tm')){var tp=t.value.match(/^(\d{1,2}):(\d{2})$/);results[Number(t.dataset.p)].time=tp?Number(tp[1])*60+Number(tp[2]):null;return}
     if(!row)return;
     var r=results[Number(row.dataset.p)].rows[Number(row.dataset.r)];
     if(t.classList.contains('rv-m')){r.m=t.value;row.querySelector('.rv-u').textContent=unitFor(t.value);if(t.value==='skip')row.querySelector('.rv-on').checked=false}
@@ -1598,7 +1723,6 @@ function showImportReview(results,warn){
     var saved=0,bad=0;
     results.forEach(function(p){
       var d=p.date||ui.date,noon=new Date(d+'T12:00:00').getTime(),t=d===today()?Date.now():noon;
-      if(p.time!=null){var pt=new Date(d+'T'+pad(Math.floor(p.time/60))+':'+pad(p.time%60)+':00').getTime();if(!isNaN(pt))t=pt}
       p.rows.forEach(function(r){
         if(!r.on||r.m==='skip')return;
         var val=Number(r.edited?num(r.vDisp):(r.m==='w'?r.v:r.v));
@@ -1712,8 +1836,12 @@ var A={
     save();el.classList.toggle('on',i<0);
     if(ui.filter==='fav'){$('#results').innerHTML=resultsHtml()}
   },
-  filter:function(el){ui.filter=el.dataset.f;render()},
-  clearq:function(){ui.q='';var q=$('#q');if(q){q.value='';q.focus()}$('#results').innerHTML=resultsHtml()},
+  filter:function(el){ui.filter=el.dataset.f;ui.lim=60;render()},
+  more:function(){ui.lim=(ui.lim||60)+60;$('#results').innerHTML=resultsHtml()},
+  usdaretry:function(){usda.state='idle';loadUsda();$('#results').innerHTML=resultsHtml()},
+  onlinesearch:onlineSearch,
+  onlinepick:onlinePick,
+  clearq:function(){ui.q='';ui.lim=60;ui.online=null;var q=$('#q');if(q){q.value='';q.focus()}$('#results').innerHTML=resultsHtml()},
   faststart:function(){openFastStart(false)},
   fastnow:function(){S.fast={start:Date.now()};save();render();toast('Fast started')},
   fastedit:function(){openFastStart(true)},
@@ -1817,7 +1945,7 @@ document.addEventListener('click',function(e){
 });
 document.addEventListener('input',function(e){
   var t=e.target;
-  if(t.id==='q'){ui.q=t.value;$('#results').innerHTML=resultsHtml();return}
+  if(t.id==='q'){ui.q=t.value;ui.lim=60;ui.online=null;$('#results').innerHTML=resultsHtml();return}
   if(t.dataset&&t.dataset.cf){ui.cf[t.dataset.cf]=t.value;var s=$('#cf-status');if(s)s.innerHTML=cfStatusHtml();return}
   if(t.id==='r-name'){ui.rd.name=t.value;return}
   if(t.id==='r-prep'){ui.rd.prep=t.value;return}
